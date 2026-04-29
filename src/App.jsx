@@ -7,7 +7,7 @@ import { classify } from './classify.js'
 
 const BUFFER_SIZE = 256
 const INFRASONIC_MIN = 0.1
-const INFRASONIC_MAX = 20
+const INFRASONIC_MAX = 8
 
 function zeroCrossingFreq(samples, sampleRate) {
   if (samples.length < 4) return null
@@ -105,67 +105,32 @@ function useMagneticSensor() {
   const [status, setStatus] = useState('idle')
   const [reading, setReading] = useState(null)
   const samplesRef = useRef([])
-  const cleanupRef = useRef(null)
+  const sensorRef = useRef(null)
 
   const pushSample = useCallback((v) => {
     samplesRef.current.push({ v, t: Date.now() })
     return rollingVariance(samplesRef)
   }, [])
 
-  const requestIOSPermission = useCallback(async () => {
-    try {
-      if (await DeviceOrientationEvent.requestPermission() !== 'granted') {
-        setStatus('unsupported'); return
-      }
-    } catch { setStatus('unsupported'); return }
-
-    const handler = (e) => {
-      const heading = e.webkitCompassHeading ?? e.alpha ?? 0
-      const variance = pushSample(heading)
-      setReading({ fluxVariance: variance.toFixed(3), heading: heading.toFixed(1), mode: 'orientation' })
-    }
-    window.addEventListener('deviceorientation', handler)
-    cleanupRef.current = () => window.removeEventListener('deviceorientation', handler)
-    setStatus('active')
-  }, [pushSample])
-
   useEffect(() => {
-    function startOrientation() {
-      if (typeof DeviceOrientationEvent === 'undefined') { setStatus('unsupported'); return }
-      if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-        setStatus('needs-permission'); return
-      }
-      const handler = (e) => {
-        const heading = e.webkitCompassHeading ?? e.alpha ?? 0
-        const variance = pushSample(heading)
-        setReading({ fluxVariance: variance.toFixed(3), heading: heading.toFixed(1), mode: 'orientation' })
-      }
-      window.addEventListener('deviceorientation', handler)
-      cleanupRef.current = () => window.removeEventListener('deviceorientation', handler)
+    if (typeof Magnetometer === 'undefined') { setStatus('unsupported'); return }
+    try {
+      const sensor = new Magnetometer({ frequency: 10 })
+      sensor.addEventListener('reading', () => {
+        const mag = Math.sqrt(sensor.x ** 2 + sensor.y ** 2 + sensor.z ** 2)
+        const variance = pushSample(mag)
+        setReading({ fluxVariance: variance.toFixed(3) })
+      })
+      sensor.addEventListener('error', () => setStatus('unsupported'))
+      sensor.start()
+      sensorRef.current = sensor
       setStatus('active')
-    }
+    } catch { setStatus('unsupported') }
 
-    if (typeof Magnetometer !== 'undefined') {
-      try {
-        const sensor = new Magnetometer({ frequency: 10 })
-        sensor.addEventListener('reading', () => {
-          const mag = Math.sqrt(sensor.x ** 2 + sensor.y ** 2 + sensor.z ** 2)
-          const variance = pushSample(mag)
-          setReading({ fluxVariance: variance.toFixed(3), heading: null, mode: 'magnetometer' })
-        })
-        sensor.addEventListener('error', startOrientation)
-        sensor.start()
-        cleanupRef.current = () => sensor.stop()
-        setStatus('active')
-      } catch { startOrientation() }
-    } else {
-      startOrientation()
-    }
-
-    return () => { if (cleanupRef.current) cleanupRef.current() }
+    return () => { if (sensorRef.current) sensorRef.current.stop() }
   }, [pushSample])
 
-  return { status, reading, requestIOSPermission }
+  return { status, reading }
 }
 
 // ─── Atmospheric Channel ─────────────────────────────────────────────────────
@@ -237,6 +202,9 @@ function KineticCard({ sensor, tier }) {
       >
         {status === 'active' ? 'Stop' : status === 'pending' ? 'Requesting…' : status === 'error' ? 'Unavailable' : 'Start Sensor'}
       </button>
+      {status === 'active' && (
+        <p className="card-hint">Place your phone on a surface for accurate readings</p>
+      )}
       {status === 'denied' && (
         <p className="card-hint">iOS: Settings → Safari → Motion &amp; Orientation Access</p>
       )}
@@ -245,7 +213,7 @@ function KineticCard({ sensor, tier }) {
 }
 
 function MagneticCard({ sensor, tier }) {
-  const { status, reading, requestIOSPermission } = sensor
+  const { status, reading } = sensor
   return (
     <div className="card card-magnetic">
       <div className="card-header">
@@ -258,16 +226,9 @@ function MagneticCard({ sensor, tier }) {
           : <span className="metric-idle">{status === 'active' ? 'Warming up…' : '—'}</span>
         }
       </div>
-      {reading?.heading && <div className="card-sub">Heading {reading.heading}° · Clarity / Peace</div>}
-      {reading && !reading.heading && <div className="card-sub">Clarity / Peace</div>}
-      {reading && <div className="card-sub mode">{reading.mode}</div>}
-      {status === 'needs-permission' && (
-        <button className="card-btn btn-start" onClick={requestIOSPermission}>
-          Allow Compass Access
-        </button>
-      )}
+      {reading && <div className="card-sub">Clarity / Peace</div>}
       {status === 'unsupported' && (
-        <p className="card-hint">Magnetometer not available in this browser</p>
+        <p className="card-hint">Requires Android Chrome — Apple restricts raw magnetometer access on all iOS browsers</p>
       )}
     </div>
   )
@@ -342,6 +303,7 @@ export default function App() {
       <div className="channels">
         <KineticCard sensor={kinetic} tier={k} />
         <MagneticCard sensor={magnetic} tier={m} />
+
         <AtmosphericCard sensor={atmospheric} tier={a} />
       </div>
 
