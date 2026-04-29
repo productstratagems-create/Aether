@@ -257,3 +257,40 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .log-k         { color: #a78bfa; }
 .log-m         { color: #38bdf8; }
 .log-a         { color: #34d399; }
+
+/* Zone Badge */
+.zone-badge {
+  display: inline-block;
+  font-size: 0.62rem;
+  font-weight: 700;
+  font-family: 'Courier New', monospace;
+  letter-spacing: 0.08em;
+  border: 1px solid;
+  border-radius: 4px;
+  padding: 0.1rem 0.4rem;
+  margin-bottom: 0.3rem;
+}
+
+.zone-oasis   { color: #34d399; border-color: #0d9488; }
+.zone-neutral { color: #9ca3af; border-color: #374151; }
+.zone-stress  { color: #f87171; border-color: #dc2626; }
+
+/* Spectrum Graph */
+.spectrum-graph {
+  display: block;
+  width: 100%;
+  margin: 0.4rem 0 0.3rem;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #0d1117;
+}
+
+/* Protocol Hint */
+.protocol-hint {
+  font-size: 0.68rem;
+  color: #4b5563;
+  font-style: italic;
+  margin-top: 0.3rem;
+  margin-bottom: 0;
+  line-height: 1.4;
+}

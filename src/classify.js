@@ -83,7 +83,7 @@ const ARCHETYPES = [
 // ─── Main classifier ──────────────────────────────────────────────────────────
 
 export function classify(kineticReading, magneticReading, atmosphericReading) {
-  const freqHz = kineticReading?.freqHz ?? null
+  const freqHz = kineticReading?.dominantHz ?? null
   const k = kineticTier(freqHz)
   const m = magneticTier(magneticReading?.fluxVariance)
   const a = atmosphericReading
