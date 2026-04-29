@@ -9,11 +9,18 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@capacitor/android": "^8.3.1",
+    "@capacitor/cli": "^8.3.1",
+    "@capacitor/core": "^8.3.1",
+    "@capacitor/ios": "^8.3.1",
+    "@capgo/capacitor-barometer": "^8.0.11",
+    "capacitor-magnetometer": "^0.0.7",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.0",
+    "typescript": "^6.0.3",
     "vite": "^6.3.0",
     "vite-plugin-pwa": "^1.2.0"
   }
