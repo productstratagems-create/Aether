@@ -11,9 +11,11 @@ const INFRASONIC_MAX = 20
 
 function zeroCrossingFreq(samples, sampleRate) {
   if (samples.length < 4) return null
+  // Subtract mean to remove DC offset (gravity when using accelerationIncludingGravity)
+  const mean = samples.reduce((a, b) => a + b, 0) / samples.length
   let crossings = 0
   for (let i = 1; i < samples.length; i++) {
-    if ((samples[i - 1] > 0) !== (samples[i] > 0)) crossings++
+    if ((samples[i - 1] - mean > 0) !== (samples[i] - mean > 0)) crossings++
   }
   const freq = crossings / (2 * (samples.length / sampleRate))
   return freq >= INFRASONIC_MIN && freq <= INFRASONIC_MAX ? freq : null
@@ -32,13 +34,15 @@ function useKineticSensor() {
   const handlerRef = useRef(null)
 
   const handleMotion = useCallback((e) => {
-    const { acceleration, interval } = e
-    if (!acceleration) return
+    const { acceleration: acc, accelerationIncludingGravity: accG, interval } = e
+    if (!acc && !accG) return
     if (interval > 0) sampleRateRef.current = 1000 / interval
 
-    const z = acceleration.z ?? 0
-    const x = acceleration.x ?? 0
-    const y = acceleration.y ?? 0
+    // acceleration (without gravity) is null on many iOS devices; fall back to
+    // accelerationIncludingGravity — DC offset is removed in zeroCrossingFreq
+    const x = acc?.x ?? accG?.x ?? 0
+    const y = acc?.y ?? accG?.y ?? 0
+    const z = acc?.z ?? accG?.z ?? 0
 
     bufferRef.current.push(z)
     if (bufferRef.current.length > BUFFER_SIZE) bufferRef.current.shift()
