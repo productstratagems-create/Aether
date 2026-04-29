@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { classify } from './classify.js'
 
 // ─── Kinetic Channel ────────────────────────────────────────────────────────
 // Detects infrasonic frequency (0.1–20 Hz) from DeviceMotionEvent Z-axis
@@ -203,17 +204,18 @@ function useAtmosphericSensor() {
 
 // ─── App ─────────────────────────────────────────────────────────────────────
 
-function StatusBadge({ status }) {
-  return <span className={`badge badge-${status}`}>{status}</span>
+function TierBadge({ tier }) {
+  if (!tier) return null
+  return <span className={`tier-badge tier-${tier.id ?? tier.level}`}>{tier.label}{tier.note ? ` · ${tier.note}` : ''}</span>
 }
 
-function KineticCard({ sensor }) {
+function KineticCard({ sensor, tier }) {
   const { status, reading, start, stop } = sensor
   return (
-    <div className={`card card-kinetic`}>
+    <div className="card card-kinetic">
       <div className="card-header">
         <span className="card-title">Kinetic</span>
-        <span className="card-sensation">Grounding / Weight</span>
+        <TierBadge tier={tier} />
       </div>
       <div className="card-metric">
         {reading?.freqHz != null
@@ -223,7 +225,7 @@ function KineticCard({ sensor }) {
           : <span className="metric-idle">—</span>
         }
       </div>
-      {reading && <div className="card-sub">|a| {reading.magnitudeRms} m/s²</div>}
+      {reading && <div className="card-sub">|a| {reading.magnitudeRms} m/s² · Grounding / Weight</div>}
       <button
         className={`card-btn ${status === 'active' ? 'btn-stop' : 'btn-start'}`}
         onClick={status === 'active' ? stop : start}
@@ -238,13 +240,13 @@ function KineticCard({ sensor }) {
   )
 }
 
-function MagneticCard({ sensor }) {
+function MagneticCard({ sensor, tier }) {
   const { status, reading, requestIOSPermission } = sensor
   return (
     <div className="card card-magnetic">
       <div className="card-header">
         <span className="card-title">Magnetic</span>
-        <span className="card-sensation">Clarity / Peace</span>
+        <TierBadge tier={tier} />
       </div>
       <div className="card-metric">
         {reading
@@ -252,7 +254,8 @@ function MagneticCard({ sensor }) {
           : <span className="metric-idle">{status === 'active' ? 'Warming up…' : '—'}</span>
         }
       </div>
-      {reading?.heading && <div className="card-sub">Heading {reading.heading}°</div>}
+      {reading?.heading && <div className="card-sub">Heading {reading.heading}° · Clarity / Peace</div>}
+      {reading && !reading.heading && <div className="card-sub">Clarity / Peace</div>}
       {reading && <div className="card-sub mode">{reading.mode}</div>}
       {status === 'needs-permission' && (
         <button className="card-btn btn-start" onClick={requestIOSPermission}>
@@ -266,13 +269,18 @@ function MagneticCard({ sensor }) {
   )
 }
 
-function AtmosphericCard({ sensor }) {
+function AtmosphericCard({ sensor, tier }) {
   const { status, reading, sample } = sensor
   return (
     <div className="card card-atmospheric">
       <div className="card-header">
         <span className="card-title">Atmospheric</span>
-        <span className="card-sensation">Freshness / Vitality</span>
+        {tier && (
+          <span className="tier-group">
+            <span className={`tier-badge tier-${tier.level}`}>{tier.label}</span>
+            <span className={`tier-badge tier-${tier.trend}`}>{tier.trendLabel}</span>
+          </span>
+        )}
       </div>
       <div className="card-metric">
         {reading
@@ -280,7 +288,8 @@ function AtmosphericCard({ sensor }) {
           : <span className="metric-idle">{status === 'sampling' ? 'Locating…' : '—'}</span>
         }
       </div>
-      {reading?.deltaP && <div className="card-sub">ΔP {reading.deltaP} hPa</div>}
+      {reading?.deltaP && <div className="card-sub">ΔP {reading.deltaP} hPa · Freshness / Vitality</div>}
+      {reading && !reading.deltaP && <div className="card-sub">Freshness / Vitality</div>}
       {reading && <div className="card-sub">{reading.lat}, {reading.lon}</div>}
       <button
         className="card-btn btn-start"
@@ -302,10 +311,17 @@ export default function App() {
   const atmospheric = useAtmosphericSensor()
   const [log, setLog] = useState([])
 
+  const { k, m, a, archetype } = useMemo(
+    () => classify(kinetic.reading, magnetic.reading, atmospheric.reading),
+    [kinetic.reading, magnetic.reading, atmospheric.reading]
+  )
+
   const capture = useCallback(() => {
+    const { archetype: arc } = classify(kinetic.reading, magnetic.reading, atmospheric.reading)
     setLog(prev => [{
       id: Date.now(),
       ts: new Date().toLocaleTimeString('en-US', { hour12: false }),
+      archetype: arc?.name ?? null,
       kinetic: kinetic.reading ? { ...kinetic.reading } : null,
       magnetic: magnetic.reading ? { ...magnetic.reading } : null,
       atmospheric: atmospheric.reading ? { ...atmospheric.reading } : null,
@@ -320,10 +336,20 @@ export default function App() {
       </header>
 
       <div className="channels">
-        <KineticCard sensor={kinetic} />
-        <MagneticCard sensor={magnetic} />
-        <AtmosphericCard sensor={atmospheric} />
+        <KineticCard sensor={kinetic} tier={k} />
+        <MagneticCard sensor={magnetic} tier={m} />
+        <AtmosphericCard sensor={atmospheric} tier={a} />
       </div>
+
+      {archetype && (
+        <div className="archetype-panel">
+          <div className="archetype-header">
+            <span className="archetype-name">{archetype.name}</span>
+            <span className="archetype-sensation">{archetype.sensation}</span>
+          </div>
+          <p className="archetype-desc">{archetype.description}</p>
+        </div>
+      )}
 
       <div className="actions">
         <button className="capture-btn" onClick={capture}>
@@ -343,6 +369,7 @@ export default function App() {
             {log.map(e => (
               <li key={e.id} className="log-entry">
                 <span className="log-ts">{e.ts}</span>
+                <span className="log-archetype">{e.archetype ?? '—'}</span>
                 <span className="log-k">{e.kinetic?.freqHz != null ? `${e.kinetic.freqHz.toFixed(2)} Hz` : '—'}</span>
                 <span className="log-m">{e.magnetic ? `Δ${e.magnetic.fluxVariance} μT` : '—'}</span>
                 <span className="log-a">{e.atmospheric ? `${e.atmospheric.pressureHpa} hPa` : '—'}</span>
