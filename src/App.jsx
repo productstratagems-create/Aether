@@ -1,7 +1,4 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { Capacitor } from '@capacitor/core'
-import { Magnetometer as NativeMagnetometer } from 'capacitor-magnetometer'
-import { CapacitorBarometer } from '@capgo/capacitor-barometer'
 import { classify } from './classify.js'
 
 // ─── Kinetic Channel ────────────────────────────────────────────────────────
@@ -116,22 +113,6 @@ function useMagneticSensor() {
   }, [])
 
   useEffect(() => {
-    if (Capacitor.isNativePlatform()) {
-      // Native iOS/Android: raw μT from CoreMotion
-      NativeMagnetometer.startMagnetometerUpdates({ frequency: 100 })
-        .then(() => {
-          NativeMagnetometer.addListener('magnetometerData', ({ x, y, z }) => {
-            const mag = Math.sqrt(x ** 2 + y ** 2 + z ** 2)
-            const variance = pushSample(mag)
-            setReading({ fluxVariance: variance.toFixed(3) })
-          })
-          setStatus('active')
-        })
-        .catch(() => setStatus('unsupported'))
-      return () => { NativeMagnetometer.stopMagnetometerUpdates() }
-    }
-
-    // Web: Generic Sensor API (Android Chrome only)
     if (typeof Magnetometer === 'undefined') { setStatus('unsupported'); return }
     try {
       const sensor = new Magnetometer({ frequency: 10 })
@@ -161,29 +142,9 @@ function useAtmosphericSensor() {
   const [reading, setReading] = useState(null)
   const prevRef = useRef(null)
 
-  const sample = useCallback(async () => {
-    setStatus('sampling')
-
-    if (Capacitor.isNativePlatform()) {
-      // Native: real device barometer — no GPS or network needed
-      try {
-        await CapacitorBarometer.startMeasurementUpdates()
-        const listener = await CapacitorBarometer.addListener('measurement', async ({ pressure }) => {
-          const deltaP = prevRef.current != null
-            ? Math.abs(pressure - prevRef.current).toFixed(2)
-            : null
-          prevRef.current = pressure
-          setReading({ pressureHpa: pressure.toFixed(1), deltaP, lat: null, lon: null })
-          setStatus('ready')
-          await listener.remove()
-          CapacitorBarometer.stopMeasurementUpdates()
-        })
-      } catch { setStatus('error') }
-      return
-    }
-
-    // Web: geolocation + Open-Meteo API
+  const sample = useCallback(() => {
     if (!navigator.geolocation) { setStatus('error'); return }
+    setStatus('sampling')
     navigator.geolocation.getCurrentPosition(
       async ({ coords: { latitude: lat, longitude: lon } }) => {
         try {

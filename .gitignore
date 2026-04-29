@@ -2,8 +2,3 @@ node_modules/
 dist/
 .env
 .env.local
-ios/Pods/
-ios/.xcode.env.local
-android/
-ios/Pods/
-ios/.xcode.env.local
