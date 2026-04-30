@@ -51,7 +51,7 @@ export default defineConfig({
       },
 
       workbox: {
-        cacheId: 'lithos-v3',
+        cacheId: 'lithos-v4',
         cleanupOutdatedCaches: true,
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
