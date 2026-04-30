@@ -288,49 +288,55 @@ function useLocationScore() {
 
   const compute = useCallback(async (lat, lon, elevationM, kineticReading, magneticReading) => {
     setStatus('computing')
+
+    // Reverse geocode — soft failure, falls back to 'Unknown'
+    let city = 'Unknown'
     try {
-      // Reverse geocode via Nominatim (OSM, no key, CORS-ok)
       const geoRes = await fetch(
         `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`
       )
       const geo = await geoRes.json()
-      const city =
+      city =
         geo?.address?.city    ??
         geo?.address?.town    ??
         geo?.address?.village ??
         geo?.address?.county  ??
         geo?.display_name?.split(',')[0] ??
         'Unknown'
+    } catch { /* proceed */ }
 
-      // GDELT social calm — negative event article count over last 30 days
+    // GDELT social calm — soft failure, score is null if unavailable
+    let negCount = null
+    let socialScoreVal = null
+    try {
       const past30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
       const fmt = d => d.toISOString().replace(/\D/g, '').slice(0, 14)
       const q = encodeURIComponent(`(protest OR riot OR unrest OR clash OR conflict) "${city}"`)
       const gdeltRes = await fetch(
         `https://api.gdeltproject.org/api/v2/doc/doc?query=${q}&mode=artcnt&format=json` +
-        `&STARTDATETIME=${fmt(past30)}&ENDTIMESTAMP=${fmt(new Date())}`
+        `&STARTDATETIME=${fmt(past30)}&ENDDATETIME=${fmt(new Date())}`
       )
-      const gdelt = await gdeltRes.json()
-      const negCount = Array.isArray(gdelt?.articles)
-        ? gdelt.articles.reduce((sum, a) => sum + (a.count ?? 0), 0)
-        : 0
+      if (gdeltRes.ok) {
+        const gdelt = await gdeltRes.json()
+        negCount = Array.isArray(gdelt?.articles)
+          ? gdelt.articles.reduce((sum, a) => sum + (a.count ?? 0), 0)
+          : 0
+        socialScoreVal = socialCalmScore(negCount)
+      }
+    } catch { /* GDELT unavailable */ }
 
-      const social  = socialCalmScore(negCount)
-      const elev    = elevationScore(elevationM)
-      const kinetic = kineticCalmScore(kineticReading?.dominantHz ?? null)
-      const magnetic = magneticCalmScore(magneticReading?.fluxVariance ?? null)
+    const elev     = elevationScore(elevationM)
+    const kinetic  = kineticCalmScore(kineticReading?.dominantHz ?? null)
+    const magnetic = magneticCalmScore(magneticReading?.fluxVariance ?? null)
 
-      setResult({
-        city,
-        negCount,
-        elevationM,
-        scores: { social, elev, kinetic, magnetic },
-        aether: compositeAether([social, elev, kinetic, magnetic]),
-      })
-      setStatus('ready')
-    } catch {
-      setStatus('error')
-    }
+    setResult({
+      city,
+      negCount,
+      elevationM,
+      scores: { social: socialScoreVal, elev, kinetic, magnetic },
+      aether: compositeAether([socialScoreVal, elev, kinetic, magnetic]),
+    })
+    setStatus('ready')
   }, [])
 
   return { status, result, compute }
