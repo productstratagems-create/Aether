@@ -365,6 +365,81 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   font-family: 'Courier New', monospace;
 }
 
+/* Location Score Card */
+.card-score { background: #0a0a1a; border-color: #6d28d944; }
+.card-score .card-title { color: #818cf8; }
+
+.score-location {
+  font-size: 0.68rem;
+  color: #4b5563;
+  font-style: italic;
+}
+
+.aether-score-wrap {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  margin: 0.4rem 0 0.75rem;
+}
+
+.aether-score-val {
+  font-size: 3.5rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  color: #818cf8;
+}
+
+.aether-score-sub { font-size: 1.1rem; color: #374151; }
+
+.score-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.score-row-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  margin-bottom: 0.2rem;
+}
+
+.score-row-label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6b7280;
+  flex: 1;
+}
+
+.score-row-detail {
+  font-size: 0.6rem;
+  color: #4b5563;
+  font-family: 'Courier New', monospace;
+}
+
+.score-row-val {
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-family: 'Courier New', monospace;
+}
+
+.score-bar-wrap {
+  height: 3px;
+  background: #1a1a2e;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.score-bar {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.6s ease;
+}
+
 /* Zone badges */
 .zone-badge {
   display: inline-block;

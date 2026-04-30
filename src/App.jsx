@@ -231,11 +231,12 @@ function useAtmosphericSensor() {
           const data = await res.json()
           const pressure = data?.current?.surface_pressure
           if (pressure == null) throw new Error()
+          const elevationM = data?.elevation != null ? Math.round(data.elevation) : null
           const deltaP = prevRef.current != null
             ? Math.abs(pressure - prevRef.current).toFixed(2)
             : null
           prevRef.current = pressure
-          setReading({ pressureHpa: pressure.toFixed(1), deltaP, lat: lat.toFixed(4), lon: lon.toFixed(4) })
+          setReading({ pressureHpa: pressure.toFixed(1), deltaP, elevationM, lat: lat.toFixed(4), lon: lon.toFixed(4) })
           setStatus('ready')
         } catch { setStatus('error') }
       },
@@ -245,6 +246,94 @@ function useAtmosphericSensor() {
   }, [])
 
   return { status, reading, sample }
+}
+
+// ─── Location Score ───────────────────────────────────────────────────────────
+// Combines GDELT social calm, elevation/remoteness, and live sensor readings
+// into a composite Aether Score (0–100) for the current GPS location.
+
+function socialCalmScore(negCount) {
+  return Math.max(15, Math.round(95 - Math.log10(negCount + 1) * 32))
+}
+
+function elevationScore(meters) {
+  if (meters == null) return null
+  return Math.min(95, Math.round(25 + Math.sqrt(Math.max(0, meters)) * 1.6))
+}
+
+function kineticCalmScore(dominantHz) {
+  if (dominantHz == null) return null
+  if (dominantHz < 0.1) return 90
+  if (dominantHz <= 5)  return 80
+  if (dominantHz <= 12) return 55
+  return 25
+}
+
+function magneticCalmScore(fluxVariance) {
+  if (fluxVariance == null) return null
+  const v = parseFloat(fluxVariance)
+  if (v < 0.5) return 88
+  if (v < 2.0) return 60
+  return 28
+}
+
+function compositeAether(layers) {
+  const valid = layers.filter(v => v != null)
+  return valid.length ? Math.round(valid.reduce((a, b) => a + b, 0) / valid.length) : null
+}
+
+function useLocationScore() {
+  const [status, setStatus] = useState('idle')
+  const [result, setResult] = useState(null)
+
+  const compute = useCallback(async (lat, lon, elevationM, kineticReading, magneticReading) => {
+    setStatus('computing')
+    try {
+      // Reverse geocode via Nominatim (OSM, no key, CORS-ok)
+      const geoRes = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`
+      )
+      const geo = await geoRes.json()
+      const city =
+        geo?.address?.city    ??
+        geo?.address?.town    ??
+        geo?.address?.village ??
+        geo?.address?.county  ??
+        geo?.display_name?.split(',')[0] ??
+        'Unknown'
+
+      // GDELT social calm — negative event article count over last 30 days
+      const past30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+      const fmt = d => d.toISOString().replace(/\D/g, '').slice(0, 14)
+      const q = encodeURIComponent(`(protest OR riot OR unrest OR clash OR conflict) "${city}"`)
+      const gdeltRes = await fetch(
+        `https://api.gdeltproject.org/api/v2/doc/doc?query=${q}&mode=artcnt&format=json` +
+        `&STARTDATETIME=${fmt(past30)}&ENDTIMESTAMP=${fmt(new Date())}`
+      )
+      const gdelt = await gdeltRes.json()
+      const negCount = Array.isArray(gdelt?.articles)
+        ? gdelt.articles.reduce((sum, a) => sum + (a.count ?? 0), 0)
+        : 0
+
+      const social  = socialCalmScore(negCount)
+      const elev    = elevationScore(elevationM)
+      const kinetic = kineticCalmScore(kineticReading?.dominantHz ?? null)
+      const magnetic = magneticCalmScore(magneticReading?.fluxVariance ?? null)
+
+      setResult({
+        city,
+        negCount,
+        elevationM,
+        scores: { social, elev, kinetic, magnetic },
+        aether: compositeAether([social, elev, kinetic, magnetic]),
+      })
+      setStatus('ready')
+    } catch {
+      setStatus('error')
+    }
+  }, [])
+
+  return { status, result, compute }
 }
 
 // ─── App ─────────────────────────────────────────────────────────────────────
@@ -387,6 +476,69 @@ function AtmosphericCard({ sensor, tier }) {
   )
 }
 
+function ScoreGauge({ label, value, detail }) {
+  if (value == null) return null
+  const color = value >= 70 ? '#34d399' : value >= 40 ? '#fbbf24' : '#f87171'
+  return (
+    <div className="score-row">
+      <div className="score-row-head">
+        <span className="score-row-label">{label}</span>
+        {detail && <span className="score-row-detail">{detail}</span>}
+        <span className="score-row-val" style={{ color }}>{value}</span>
+      </div>
+      <div className="score-bar-wrap">
+        <div className="score-bar" style={{ width: `${value}%`, background: color }} />
+      </div>
+    </div>
+  )
+}
+
+function LocationScoreCard({ atmospheric, kinetic, magnetic }) {
+  const { status, result, compute } = useLocationScore()
+  const reading = atmospheric.reading
+
+  const handleCompute = useCallback(() => {
+    if (!reading) return
+    compute(reading.lat, reading.lon, reading.elevationM, kinetic.reading, magnetic.reading)
+  }, [reading, kinetic.reading, magnetic.reading, compute])
+
+  return (
+    <div className="card card-score">
+      <div className="card-header">
+        <span className="card-title">Aether Score</span>
+        {result && <span className="score-location">{result.city}</span>}
+      </div>
+
+      {result?.aether != null && (
+        <div className="aether-score-wrap">
+          <span className="aether-score-val">{result.aether}</span>
+          <span className="aether-score-sub">/100</span>
+        </div>
+      )}
+
+      {result && (
+        <div className="score-breakdown">
+          <ScoreGauge label="Social"     value={result.scores.social}   detail={`${result.negCount} events/30d`} />
+          <ScoreGauge label="Terrain"    value={result.scores.elev}     detail={result.elevationM != null ? `${result.elevationM} m asl` : null} />
+          <ScoreGauge label="Infrasound" value={result.scores.kinetic}  detail={kinetic.reading?.dominantHz != null ? `${kinetic.reading.dominantHz.toFixed(1)} Hz` : 'no reading'} />
+          <ScoreGauge label="Magnetic"   value={result.scores.magnetic} detail={magnetic.reading ? `Δ${magnetic.reading.fluxVariance} μT` : 'no reading'} />
+        </div>
+      )}
+
+      <button
+        className="card-btn btn-start"
+        onClick={handleCompute}
+        disabled={!reading || status === 'computing'}
+      >
+        {status === 'computing' ? 'Analysing…' : status === 'ready' ? 'Refresh Score' : 'Score Location'}
+      </button>
+
+      {!reading && <p className="card-hint">Sample atmosphere first to obtain GPS coordinates</p>}
+      {status === 'error' && <p className="card-hint">Could not reach scoring APIs — check network</p>}
+    </div>
+  )
+}
+
 export default function App() {
   const kinetic = useKineticSensor()
   const magnetic = useMagneticSensor()
@@ -421,6 +573,7 @@ export default function App() {
         <KineticCard sensor={kinetic} tier={k} />
         <MagneticCard sensor={magnetic} tier={m} />
         <AtmosphericCard sensor={atmospheric} tier={a} />
+        <LocationScoreCard atmospheric={atmospheric} kinetic={kinetic} magnetic={magnetic} />
       </div>
 
       {archetype && (
