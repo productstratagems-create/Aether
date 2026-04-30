@@ -383,11 +383,11 @@ function ZoneBadge({ zone }) {
 
 function SpectrumGraph({ bins, zone }) {
   if (!bins || bins.length < 2) return null
-  const W = 300, H = 56
+  const W = 300, H = 72
   const maxHz = bins[bins.length - 1].hz || SPECTRUM_MAX_HZ
 
   const toX = hz => (hz / maxHz) * W
-  const toY = mag => H - 3 - mag * 50
+  const toY = mag => (H - 16) - mag * (H - 24)
 
   const points = bins
     .map(({ hz, mag }) => `${toX(hz).toFixed(1)},${toY(mag).toFixed(1)}`)
@@ -398,45 +398,86 @@ function SpectrumGraph({ bins, zone }) {
   return (
     <svg className="spectrum-graph" width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
       {/* Zone background bands */}
-      <rect x="0"          y="0" width={toX(1)}            height={H} fill="#374151" opacity="0.4" />
-      <rect x={toX(1)}     y="0" width={toX(5) - toX(1)}   height={H} fill="#0d9488" opacity="0.15" />
-      <rect x={toX(5)}     y="0" width={toX(12) - toX(5)}  height={H} fill="#6b7280" opacity="0.08" />
-      <rect x={toX(12)}    y="0" width={toX(20) - toX(12)} height={H} fill="#dc2626" opacity="0.12" />
+      <rect x="0"          y="0" width={toX(1)}            height={H} fill="#374151" opacity="0.3" />
+      <rect x={toX(1)}     y="0" width={toX(5) - toX(1)}   height={H} fill="#0d9488" opacity="0.12" />
+      <rect x={toX(5)}     y="0" width={toX(12) - toX(5)}  height={H} fill="#6b7280" opacity="0.06" />
+      <rect x={toX(12)}    y="0" width={toX(20) - toX(12)} height={H} fill="#dc2626" opacity="0.10" />
       {/* Spectral line */}
       <polyline points={points} fill="none" stroke={lineColor} strokeWidth="1.5" strokeLinejoin="round" />
-      {/* Zone labels */}
-      <text x={toX(1) + 3}  y={H - 4} fontSize="7" fill="#0d9488" opacity="0.8">OASIS</text>
-      <text x={toX(12) + 3} y={H - 4} fontSize="7" fill="#dc2626" opacity="0.8">STRESS</text>
+      {/* Zone labels — top */}
+      <text x={toX(1)  + 4} y="11" fontSize="9" fill="#0d9488" opacity="0.9" fontWeight="600">OASIS</text>
+      <text x={toX(5)  + 4} y="11" fontSize="9" fill="#6b7280" opacity="0.7">NEUTRAL</text>
+      <text x={toX(12) + 4} y="11" fontSize="9" fill="#dc2626" opacity="0.9" fontWeight="600">STRESS</text>
+      {/* Hz tick marks — bottom */}
+      <text x={toX(1)}       y={H - 2} fontSize="7" fill="#374151" textAnchor="middle">1</text>
+      <text x={toX(5)}       y={H - 2} fontSize="7" fill="#374151" textAnchor="middle">5</text>
+      <text x={toX(12)}      y={H - 2} fontSize="7" fill="#374151" textAnchor="middle">12</text>
+      <text x={toX(20) - 4}  y={H - 2} fontSize="7" fill="#374151">20 Hz</text>
     </svg>
   )
 }
 
+const ZONE_INFO = {
+  oasis:   {
+    label: 'Oasis',
+    color: '#34d399', border: '#0d9488', bg: '#022c22',
+    desc:  'Natural ground resonance — forests, open fields, deep earth. Restorative frequency range.',
+  },
+  neutral: {
+    label: 'Neutral',
+    color: '#9ca3af', border: '#374151', bg: '#111827',
+    desc:  'Mixed field — natural and mechanical signals present. Ambiguous environment.',
+  },
+  stress:  {
+    label: 'Stress Node',
+    color: '#f87171', border: '#dc2626', bg: '#1f0a0a',
+    desc:  'Mechanical interference — HVAC, traffic, or industrial vibration detected.',
+  },
+}
+
 function KineticCard({ sensor, tier }) {
   const { status, reading, start, stop } = sensor
+  const zone = reading?.zone ?? null
+  const zInfo = zone ? ZONE_INFO[zone] : null
+
   return (
     <div className="card card-kinetic">
       <div className="card-header">
-        <span className="card-title">Kinetic</span>
-        <TierBadge tier={tier} />
+        <span className="card-title">Ground Signal</span>
+        <span className="card-sensation">Low-frequency vibration</span>
       </div>
-      <div className="card-metric">
-        {reading?.dominantHz != null
-          ? <><span className="metric-value">{reading.dominantHz.toFixed(2)}</span><span className="metric-unit"> Hz</span></>
-          : status === 'active'
-          ? <span className="metric-idle">Buffering…</span>
-          : <span className="metric-idle">—</span>
-        }
-      </div>
-      {reading?.zone && <ZoneBadge zone={reading.zone} />}
-      {reading && <div className="card-sub">|a| {reading.magnitudeRms} m/s²</div>}
-      {reading?.spectrum && <SpectrumGraph bins={reading.spectrum} zone={reading.zone} />}
-      <p className="protocol-hint">Place flat on concrete or stone · Silence · 60 s</p>
+
+      {status !== 'active' && (
+        <p className="protocol-hint">Place phone flat on concrete or stone · silence · allow 60 s</p>
+      )}
+
+      {status === 'active' && !reading?.dominantHz && (
+        <p className="metric-idle" style={{ margin: '0.6rem 0' }}>Listening…</p>
+      )}
+
+      {reading?.spectrum && (
+        <SpectrumGraph bins={reading.spectrum} zone={zone} />
+      )}
+
+      {zInfo && (
+        <div className="zone-verdict" style={{ background: zInfo.bg, borderColor: zInfo.border }}>
+          <div className="zone-verdict-top">
+            <span className="zone-verdict-name" style={{ color: zInfo.color }}>{zInfo.label}</span>
+            <span className="zone-verdict-hz">{reading.dominantHz.toFixed(2)} Hz</span>
+          </div>
+          <p className="zone-verdict-desc">{zInfo.desc}</p>
+        </div>
+      )}
+
       <button
         className={`card-btn ${status === 'active' ? 'btn-stop' : 'btn-start'}`}
         onClick={status === 'active' ? stop : start}
         disabled={status === 'pending' || status === 'error'}
       >
-        {status === 'active' ? 'Stop' : status === 'pending' ? 'Requesting…' : status === 'error' ? 'Unavailable' : 'Start Sensor'}
+        {status === 'active' ? 'Stop'
+          : status === 'pending' ? 'Requesting…'
+          : status === 'error'   ? 'Unavailable'
+          : 'Start Scan'}
       </button>
       {status === 'denied' && (
         <p className="card-hint">iOS: Settings → Safari → Motion &amp; Orientation Access</p>

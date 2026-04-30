@@ -440,6 +440,40 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   transition: width 0.6s ease;
 }
 
+/* Zone verdict panel (KineticCard) */
+.zone-verdict {
+  border: 1px solid;
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  margin: 0.4rem 0 0.1rem;
+}
+
+.zone-verdict-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.25rem;
+}
+
+.zone-verdict-name {
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.zone-verdict-hz {
+  font-size: 0.72rem;
+  color: #6b7280;
+  font-family: 'Courier New', monospace;
+}
+
+.zone-verdict-desc {
+  font-size: 0.74rem;
+  color: #9ca3af;
+  line-height: 1.45;
+  margin: 0;
+}
+
 /* Zone badges */
 .zone-badge {
   display: inline-block;
