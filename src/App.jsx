@@ -277,6 +277,12 @@ function magneticCalmScore(fluxVariance) {
   return 28
 }
 
+function emDensityScore(count) {
+  if (count == null) return null
+  // 0 towers → 95, 2 → 83, 10 → 68, 30 → 53, 100+ → 15
+  return Math.max(15, Math.round(95 - Math.log10(count + 1) * 40))
+}
+
 function compositeAether(layers) {
   const valid = layers.filter(v => v != null)
   return valid.length ? Math.round(valid.reduce((a, b) => a + b, 0) / valid.length) : null
@@ -325,6 +331,25 @@ function useLocationScore() {
       }
     } catch { /* GDELT unavailable */ }
 
+    // OSM Overpass — communication towers within 5 km radius
+    let emCount = null
+    let emScoreVal = null
+    try {
+      const oq =
+        `[out:json][timeout:15];` +
+        `(node["tower:type"="communication"](around:5000,${lat},${lon});` +
+        `way["tower:type"="communication"](around:5000,${lat},${lon}););` +
+        `out count;`
+      const osmRes = await fetch('https://overpass-api.de/api/interpreter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `data=${encodeURIComponent(oq)}`,
+      })
+      const osm = await osmRes.json()
+      emCount = parseInt(osm?.elements?.[0]?.tags?.total ?? '0', 10)
+      emScoreVal = emDensityScore(emCount)
+    } catch { /* Overpass unavailable */ }
+
     const elev     = elevationScore(elevationM)
     const kinetic  = kineticCalmScore(kineticReading?.dominantHz ?? null)
     const magnetic = magneticCalmScore(magneticReading?.fluxVariance ?? null)
@@ -333,8 +358,9 @@ function useLocationScore() {
       city,
       negCount,
       elevationM,
-      scores: { social: socialScoreVal, elev, kinetic, magnetic },
-      aether: compositeAether([socialScoreVal, elev, kinetic, magnetic]),
+      emCount,
+      scores: { social: socialScoreVal, elev, em: emScoreVal, kinetic, magnetic },
+      aether: compositeAether([socialScoreVal, elev, emScoreVal, kinetic, magnetic]),
     })
     setStatus('ready')
   }, [])
@@ -524,10 +550,11 @@ function LocationScoreCard({ atmospheric, kinetic, magnetic }) {
 
       {result && (
         <div className="score-breakdown">
-          <ScoreGauge label="Social"     value={result.scores.social}   detail={`${result.negCount} events/30d`} />
+          <ScoreGauge label="Social"     value={result.scores.social}   detail={result.negCount != null ? `${result.negCount} events/30d` : null} />
           <ScoreGauge label="Terrain"    value={result.scores.elev}     detail={result.elevationM != null ? `${result.elevationM} m asl` : null} />
-          <ScoreGauge label="Infrasound" value={result.scores.kinetic}  detail={kinetic.reading?.dominantHz != null ? `${kinetic.reading.dominantHz.toFixed(1)} Hz` : 'no reading'} />
-          <ScoreGauge label="Magnetic"   value={result.scores.magnetic} detail={magnetic.reading ? `Δ${magnetic.reading.fluxVariance} μT` : 'no reading'} />
+          <ScoreGauge label="EM Density" value={result.scores.em}       detail={result.emCount != null ? `${result.emCount} towers/5 km` : null} />
+          <ScoreGauge label="Infrasound" value={result.scores.kinetic}  detail={kinetic.reading?.dominantHz != null ? `${kinetic.reading.dominantHz.toFixed(1)} Hz` : null} />
+          <ScoreGauge label="Magnetic"   value={result.scores.magnetic} detail={magnetic.reading ? `Δ${magnetic.reading.fluxVariance} μT` : null} />
         </div>
       )}
 
