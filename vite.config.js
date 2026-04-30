@@ -11,6 +11,7 @@ export default defineConfig({
     react(),
 
     VitePWA({
+      selfDestroying: true,
       strategies: 'generateSW',
       filename: 'sw.js',
       registerType: 'autoUpdate',
