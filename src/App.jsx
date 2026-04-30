@@ -311,25 +311,20 @@ function useLocationScore() {
         'Unknown'
     } catch { /* proceed */ }
 
-    // GDELT social calm — soft failure, score is null if unavailable
+    // Wikipedia — conflict article count for city (CORS-ok via origin=*)
+    // GDELT blocked all non-browser origins (403); Wikipedia MediaWiki API is public.
     let negCount = null
     let socialScoreVal = null
     try {
-      const past30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
-      const fmt = d => d.toISOString().replace(/\D/g, '').slice(0, 14)
-      const q = encodeURIComponent(`(protest OR riot OR unrest OR clash OR conflict) "${city}"`)
-      const gdeltRes = await fetch(
-        `https://api.gdeltproject.org/api/v2/doc/doc?query=${q}&mode=artcnt&format=json` +
-        `&STARTDATETIME=${fmt(past30)}&ENDDATETIME=${fmt(new Date())}`
+      const wq = encodeURIComponent(`(protest OR riot OR unrest OR conflict) "${city}"`)
+      const wikiRes = await fetch(
+        `https://en.wikipedia.org/w/api.php?action=query&list=search` +
+        `&srsearch=${wq}&srnamespace=0&srlimit=1&format=json&origin=*`
       )
-      if (gdeltRes.ok) {
-        const gdelt = await gdeltRes.json()
-        negCount = Array.isArray(gdelt?.articles)
-          ? gdelt.articles.reduce((sum, a) => sum + (a.count ?? 0), 0)
-          : 0
-        socialScoreVal = socialCalmScore(negCount)
-      }
-    } catch { /* GDELT unavailable */ }
+      const wiki = await wikiRes.json()
+      negCount = wiki?.query?.searchinfo?.totalhits ?? 0
+      socialScoreVal = socialCalmScore(negCount)
+    } catch { /* Wikipedia unavailable */ }
 
     // OSM Overpass — communication towers within 5 km radius
     let emCount = null
@@ -550,7 +545,7 @@ function LocationScoreCard({ atmospheric, kinetic, magnetic }) {
 
       {result && (
         <div className="score-breakdown">
-          <ScoreGauge label="Social"     value={result.scores.social}   detail={result.negCount != null ? `${result.negCount} events/30d` : null} />
+          <ScoreGauge label="Social"     value={result.scores.social}   detail={result.negCount != null ? `${result.negCount} wiki hits` : null} />
           <ScoreGauge label="Terrain"    value={result.scores.elev}     detail={result.elevationM != null ? `${result.elevationM} m asl` : null} />
           <ScoreGauge label="EM Density" value={result.scores.em}       detail={result.emCount != null ? `${result.emCount} towers/5 km` : null} />
           <ScoreGauge label="Infrasound" value={result.scores.kinetic}  detail={kinetic.reading?.dominantHz != null ? `${kinetic.reading.dominantHz.toFixed(1)} Hz` : null} />
