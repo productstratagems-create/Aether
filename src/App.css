@@ -365,6 +365,33 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   font-family: 'Courier New', monospace;
 }
 
+/* Zone badges */
+.zone-badge {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-family: 'Courier New', monospace;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  border: 1px solid;
+  margin-bottom: 0.3rem;
+}
+
+.zone-oasis   { color: #34d399; border-color: #0d9488; background: #022c22; }
+.zone-neutral { color: #9ca3af; border-color: #374151; background: #111827; }
+.zone-stress  { color: #f87171; border-color: #dc2626; background: #1f0a0a; }
+
+/* Spectrum graph SVG */
+.spectrum-graph {
+  display: block;
+  margin: 0.4rem 0;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #0d1117;
+}
+
 /* Protocol Hint */
 .protocol-hint {
   font-size: 0.68rem;
