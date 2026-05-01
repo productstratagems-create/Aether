@@ -86,6 +86,24 @@ function computeSpectrum(samples, sampleRate) {
   return { bins, dominantHz, zone }
 }
 
+function zoneEnergies(bins) {
+  if (!bins || bins.length < 2) return null
+  let oasis = 0, neutral = 0, stress = 0, total = 0
+  for (const { hz, mag } of bins) {
+    if (hz < 1) continue
+    total += mag
+    if (hz <= 5)       oasis   += mag
+    else if (hz <= 12) neutral  += mag
+    else               stress   += mag
+  }
+  if (total === 0) return null
+  return {
+    oasis:   Math.round((oasis   / total) * 100),
+    neutral: Math.round((neutral / total) * 100),
+    stress:  Math.round((stress  / total) * 100),
+  }
+}
+
 function rms(values) {
   if (!values.length) return 0
   return Math.sqrt(values.reduce((s, v) => s + v * v, 0) / values.length)
@@ -102,7 +120,12 @@ function useKineticSensor() {
   const handleMotion = useCallback((e) => {
     const { acceleration: acc, accelerationIncludingGravity: accG, interval } = e
     if (!acc && !accG) return
-    if (interval > 0) sampleRateRef.current = 1000 / interval
+    if (interval > 0) {
+      const rate = 1000 / interval
+      // iOS Safari reports interval in seconds rather than milliseconds;
+      // guard: if bin width (rate/FFT_SIZE) > 1 Hz the unit is wrong → divide by 1000
+      sampleRateRef.current = rate / FFT_SIZE > 1 ? rate / 1000 : rate
+    }
 
     // acceleration (without gravity) is null on many iOS devices; fall back to
     // accelerationIncludingGravity — DC offset is removed in computeSpectrum
@@ -417,6 +440,30 @@ function SpectrumGraph({ bins, zone }) {
   )
 }
 
+function ZoneEnergyBars({ bins }) {
+  const energies = zoneEnergies(bins)
+  if (!energies) return null
+  const rows = [
+    { key: 'oasis',   label: 'Oasis',      range: '1–5 Hz',   color: '#34d399', pct: energies.oasis   },
+    { key: 'neutral', label: 'Neutral',     range: '5–12 Hz',  color: '#9ca3af', pct: energies.neutral },
+    { key: 'stress',  label: 'Stress Node', range: '12–20 Hz', color: '#f87171', pct: energies.stress  },
+  ]
+  return (
+    <div className="zone-bars">
+      {rows.map(({ key, label, range, color, pct }) => (
+        <div key={key} className="zone-bar-row">
+          <span className="zone-bar-label" style={{ color }}>{label}</span>
+          <div className="zone-bar-track">
+            <div className="zone-bar-fill" style={{ width: `${pct}%`, background: color }} />
+          </div>
+          <span className="zone-bar-pct">{pct}%</span>
+          <span className="zone-bar-range">{range}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 const ZONE_INFO = {
   oasis:   {
     label: 'Oasis',
@@ -455,9 +502,7 @@ function KineticCard({ sensor, tier }) {
         <p className="metric-idle" style={{ margin: '0.6rem 0' }}>Listening…</p>
       )}
 
-      {reading?.spectrum && (
-        <SpectrumGraph bins={reading.spectrum} zone={zone} />
-      )}
+      {reading?.spectrum && <ZoneEnergyBars bins={reading.spectrum} />}
 
       {zInfo && (
         <div className="zone-verdict" style={{ background: zInfo.bg, borderColor: zInfo.border }}>

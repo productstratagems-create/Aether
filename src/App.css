@@ -510,3 +510,52 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   margin-bottom: 0;
   line-height: 1.4;
 }
+
+/* Zone energy bars */
+.zone-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0.5rem 0 0.35rem;
+}
+
+.zone-bar-row {
+  display: grid;
+  grid-template-columns: 6rem 1fr 2.4rem 3.5rem;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.zone-bar-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.zone-bar-track {
+  height: 6px;
+  background: #1f2937;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.zone-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.zone-bar-pct {
+  font-size: 0.65rem;
+  font-family: 'Courier New', monospace;
+  color: #6b7280;
+  text-align: right;
+}
+
+.zone-bar-range {
+  font-size: 0.6rem;
+  font-family: 'Courier New', monospace;
+  color: #374151;
+  white-space: nowrap;
+}
