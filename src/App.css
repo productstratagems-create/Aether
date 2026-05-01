@@ -365,6 +365,142 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   font-family: 'Courier New', monospace;
 }
 
+/* Location Score Card */
+.card-score { background: #0a0a1a; border-color: #6d28d944; }
+.card-score .card-title { color: #818cf8; }
+
+.score-location {
+  font-size: 0.68rem;
+  color: #4b5563;
+  font-style: italic;
+}
+
+.aether-score-wrap {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  margin: 0.4rem 0 0.75rem;
+}
+
+.aether-score-val {
+  font-size: 3.5rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  color: #818cf8;
+}
+
+.aether-score-sub { font-size: 1.1rem; color: #374151; }
+
+.score-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.score-row-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  margin-bottom: 0.2rem;
+}
+
+.score-row-label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6b7280;
+  flex: 1;
+}
+
+.score-row-detail {
+  font-size: 0.6rem;
+  color: #4b5563;
+  font-family: 'Courier New', monospace;
+}
+
+.score-row-val {
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-family: 'Courier New', monospace;
+}
+
+.score-bar-wrap {
+  height: 3px;
+  background: #1a1a2e;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.score-bar {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.6s ease;
+}
+
+/* Zone verdict panel (KineticCard) */
+.zone-verdict {
+  border: 1px solid;
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  margin: 0.4rem 0 0.1rem;
+}
+
+.zone-verdict-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.25rem;
+}
+
+.zone-verdict-name {
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.zone-verdict-hz {
+  font-size: 0.72rem;
+  color: #6b7280;
+  font-family: 'Courier New', monospace;
+}
+
+.zone-verdict-desc {
+  font-size: 0.74rem;
+  color: #9ca3af;
+  line-height: 1.45;
+  margin: 0;
+}
+
+/* Zone badges */
+.zone-badge {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-family: 'Courier New', monospace;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  border: 1px solid;
+  margin-bottom: 0.3rem;
+}
+
+.zone-oasis   { color: #34d399; border-color: #0d9488; background: #022c22; }
+.zone-neutral { color: #9ca3af; border-color: #374151; background: #111827; }
+.zone-stress  { color: #f87171; border-color: #dc2626; background: #1f0a0a; }
+
+/* Spectrum graph SVG */
+.spectrum-graph {
+  display: block;
+  margin: 0.4rem 0;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #0d1117;
+}
+
 /* Protocol Hint */
 .protocol-hint {
   font-size: 0.68rem;
@@ -373,4 +509,53 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   margin-top: 0.3rem;
   margin-bottom: 0;
   line-height: 1.4;
+}
+
+/* Zone energy bars */
+.zone-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0.5rem 0 0.35rem;
+}
+
+.zone-bar-row {
+  display: grid;
+  grid-template-columns: 6rem 1fr 2.4rem 3.5rem;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.zone-bar-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.zone-bar-track {
+  height: 6px;
+  background: #1f2937;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.zone-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.zone-bar-pct {
+  font-size: 0.65rem;
+  font-family: 'Courier New', monospace;
+  color: #6b7280;
+  text-align: right;
+}
+
+.zone-bar-range {
+  font-size: 0.6rem;
+  font-family: 'Courier New', monospace;
+  color: #374151;
+  white-space: nowrap;
 }

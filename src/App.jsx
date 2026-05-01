@@ -2,11 +2,14 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { classify } from './classify.js'
 
 // ─── Kinetic Channel ────────────────────────────────────────────────────────
+// Detects infrasonic frequency (0–20 Hz) from DeviceMotionEvent Z-axis
+// using Cooley-Tukey FFT over a rolling 512-sample buffer (Hanning-windowed).
 
 const FFT_SIZE = 512
 const SPECTRUM_MAX_HZ = 20
 const SPECTRUM_UPDATE_MS = 500
 
+// Precomputed Hanning window for FFT_SIZE to avoid per-call allocation
 const HANN = (() => {
   const w = new Float32Array(FFT_SIZE)
   for (let i = 0; i < FFT_SIZE; i++) {
@@ -15,6 +18,7 @@ const HANN = (() => {
   return w
 })()
 
+// In-place Cooley-Tukey radix-2 DIT FFT
 function fft(re, im) {
   const n = re.length
   for (let i = 1, j = 0; i < n; i++) {
@@ -49,6 +53,7 @@ function fft(re, im) {
 
 function computeSpectrum(samples, sampleRate) {
   const n = samples.length
+  // DC removal to prevent gravity offset from swamping the spectrum
   const mean = samples.reduce((a, b) => a + b, 0) / n
   const re = new Float32Array(n)
   const im = new Float32Array(n)
@@ -58,17 +63,13 @@ function computeSpectrum(samples, sampleRate) {
   const freqRes = sampleRate / n
   const maxBin = Math.min(Math.ceil(SPECTRUM_MAX_HZ / freqRes), (n >> 1) - 1)
 
-  let maxMag = 0, dominantBin = 1
-  let oasisPower = 0, stressPower = 0
+  let maxMag = 0
+  let dominantBin = 1
   const rawMags = []
-
   for (let k = 0; k <= maxBin; k++) {
     const mag = Math.sqrt(re[k] ** 2 + im[k] ** 2) / n
     rawMags.push(mag)
     if (k > 0 && mag > maxMag) { maxMag = mag; dominantBin = k }
-    const hz = k * freqRes
-    if (hz >= 1 && hz <= 5)  oasisPower  += mag * mag
-    else if (hz > 12)         stressPower += mag * mag
   }
 
   const bins = rawMags.map((mag, k) => ({
@@ -78,14 +79,34 @@ function computeSpectrum(samples, sampleRate) {
 
   const dominantHz = dominantBin * freqRes
   let zone = null
-  if (dominantHz >= 1 && dominantHz <= 5)  zone = 'oasis'
+  if (dominantHz >= 1 && dominantHz <= 5) zone = 'oasis'
   else if (dominantHz > 5 && dominantHz <= 12) zone = 'neutral'
   else if (dominantHz > 12) zone = 'stress'
 
-  const totalZonePower = oasisPower + stressPower
-  const balance = totalZonePower > 0 ? stressPower / totalZonePower : 0.5
+  return { bins, dominantHz, zone }
+}
 
-  return { bins, dominantHz, zone, balance }
+function zoneEnergies(bins) {
+  if (!bins || bins.length < 2) return null
+  let oasis = 0, neutral = 0, stress = 0, total = 0
+  for (const { hz, mag } of bins) {
+    if (hz < 1) continue
+    total += mag
+    if (hz <= 5)       oasis   += mag
+    else if (hz <= 12) neutral  += mag
+    else               stress   += mag
+  }
+  if (total === 0) return null
+  return {
+    oasis:   Math.round((oasis   / total) * 100),
+    neutral: Math.round((neutral / total) * 100),
+    stress:  Math.round((stress  / total) * 100),
+  }
+}
+
+function rms(values) {
+  if (!values.length) return 0
+  return Math.sqrt(values.reduce((s, v) => s + v * v, 0) / values.length)
 }
 
 function useKineticSensor() {
@@ -99,8 +120,15 @@ function useKineticSensor() {
   const handleMotion = useCallback((e) => {
     const { acceleration: acc, accelerationIncludingGravity: accG, interval } = e
     if (!acc && !accG) return
-    if (interval > 0) sampleRateRef.current = 1000 / interval
+    if (interval > 0) {
+      const rate = 1000 / interval
+      // iOS Safari reports interval in seconds rather than milliseconds;
+      // guard: if bin width (rate/FFT_SIZE) > 1 Hz the unit is wrong → divide by 1000
+      sampleRateRef.current = rate / FFT_SIZE > 1 ? rate / 1000 : rate
+    }
 
+    // acceleration (without gravity) is null on many iOS devices; fall back to
+    // accelerationIncludingGravity — DC offset is removed in computeSpectrum
     const x = acc?.x ?? accG?.x ?? 0
     const y = acc?.y ?? accG?.y ?? 0
     const z = acc?.z ?? accG?.z ?? 0
@@ -108,17 +136,17 @@ function useKineticSensor() {
     bufferRef.current.push(z)
     if (bufferRef.current.length > FFT_SIZE) bufferRef.current.shift()
 
-    const progress = bufferRef.current.length / FFT_SIZE
+    const magnitudeRms = rms([x, y, z])
     const now = Date.now()
 
     if (bufferRef.current.length === FFT_SIZE && now - lastSpectrumRef.current >= SPECTRUM_UPDATE_MS) {
       lastSpectrumRef.current = now
-      const { bins, dominantHz, zone, balance } = computeSpectrum(bufferRef.current, sampleRateRef.current)
-      setReading({ dominantHz, spectrum: bins, zone, balance, progress: 1 })
+      const { bins, dominantHz, zone } = computeSpectrum(bufferRef.current, sampleRateRef.current)
+      setReading({ dominantHz, magnitudeRms: magnitudeRms.toFixed(3), spectrum: bins, zone })
     } else {
       setReading(prev => prev
-        ? { ...prev, progress }
-        : { dominantHz: null, spectrum: null, zone: null, balance: null, progress }
+        ? { ...prev, magnitudeRms: magnitudeRms.toFixed(3) }
+        : { dominantHz: null, magnitudeRms: magnitudeRms.toFixed(3), spectrum: null, zone: null }
       )
     }
   }, [])
@@ -157,6 +185,9 @@ function useKineticSensor() {
 }
 
 // ─── Magnetic Channel ────────────────────────────────────────────────────────
+// Computes rolling flux variance (stddev) over 5 seconds.
+// Uses Generic Sensor API (Magnetometer) on Android only — Apple restricts
+// raw magnetometer access on all iOS browsers.
 
 const MAGNETIC_WINDOW_MS = 5000
 
@@ -173,70 +204,37 @@ function useMagneticSensor() {
   const [status, setStatus] = useState('idle')
   const [reading, setReading] = useState(null)
   const samplesRef = useRef([])
-  const cleanupRef = useRef(null)
+  const sensorRef = useRef(null)
 
   const pushSample = useCallback((v) => {
     samplesRef.current.push({ v, t: Date.now() })
     return rollingVariance(samplesRef)
   }, [])
 
-  const requestIOSPermission = useCallback(async () => {
-    try {
-      if (await DeviceOrientationEvent.requestPermission() !== 'granted') {
-        setStatus('unsupported'); return
-      }
-    } catch { setStatus('unsupported'); return }
-
-    const handler = (e) => {
-      const heading = e.webkitCompassHeading ?? e.alpha ?? 0
-      const variance = pushSample(heading)
-      setReading({ fluxVariance: variance.toFixed(3), heading: heading.toFixed(1), mode: 'orientation' })
-    }
-    window.addEventListener('deviceorientation', handler)
-    cleanupRef.current = () => window.removeEventListener('deviceorientation', handler)
-    setStatus('active')
-  }, [pushSample])
-
   useEffect(() => {
-    function startOrientation() {
-      if (typeof DeviceOrientationEvent === 'undefined') { setStatus('unsupported'); return }
-      if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-        setStatus('needs-permission'); return
-      }
-      const handler = (e) => {
-        const heading = e.webkitCompassHeading ?? e.alpha ?? 0
-        const variance = pushSample(heading)
-        setReading({ fluxVariance: variance.toFixed(3), heading: heading.toFixed(1), mode: 'orientation' })
-      }
-      window.addEventListener('deviceorientation', handler)
-      cleanupRef.current = () => window.removeEventListener('deviceorientation', handler)
+    if (typeof Magnetometer === 'undefined') { setStatus('unsupported'); return }
+    try {
+      const sensor = new Magnetometer({ frequency: 10 })
+      sensor.addEventListener('reading', () => {
+        const mag = Math.sqrt(sensor.x ** 2 + sensor.y ** 2 + sensor.z ** 2)
+        const variance = pushSample(mag)
+        setReading({ fluxVariance: variance.toFixed(3) })
+      })
+      sensor.addEventListener('error', () => setStatus('unsupported'))
+      sensor.start()
+      sensorRef.current = sensor
       setStatus('active')
-    }
+    } catch { setStatus('unsupported') }
 
-    if (typeof Magnetometer !== 'undefined') {
-      try {
-        const sensor = new Magnetometer({ frequency: 10 })
-        sensor.addEventListener('reading', () => {
-          const mag = Math.sqrt(sensor.x ** 2 + sensor.y ** 2 + sensor.z ** 2)
-          const variance = pushSample(mag)
-          setReading({ fluxVariance: variance.toFixed(3), heading: null, mode: 'magnetometer' })
-        })
-        sensor.addEventListener('error', startOrientation)
-        sensor.start()
-        cleanupRef.current = () => sensor.stop()
-        setStatus('active')
-      } catch { startOrientation() }
-    } else {
-      startOrientation()
-    }
-
-    return () => { if (cleanupRef.current) cleanupRef.current() }
+    return () => { if (sensorRef.current) sensorRef.current.stop() }
   }, [pushSample])
 
-  return { status, reading, requestIOSPermission }
+  return { status, reading }
 }
 
 // ─── Atmospheric Channel ─────────────────────────────────────────────────────
+// Fetches current barometric pressure from Open-Meteo (free, no key)
+// using the device's GPS coordinates. Computes delta between consecutive samples.
 
 function useAtmosphericSensor() {
   const [status, setStatus] = useState('idle')
@@ -256,11 +254,12 @@ function useAtmosphericSensor() {
           const data = await res.json()
           const pressure = data?.current?.surface_pressure
           if (pressure == null) throw new Error()
+          const elevationM = data?.elevation != null ? Math.round(data.elevation) : null
           const deltaP = prevRef.current != null
             ? Math.abs(pressure - prevRef.current).toFixed(2)
             : null
           prevRef.current = pressure
-          setReading({ pressureHpa: pressure.toFixed(1), deltaP, lat: lat.toFixed(4), lon: lon.toFixed(4) })
+          setReading({ pressureHpa: pressure.toFixed(1), deltaP, elevationM, lat: lat.toFixed(4), lon: lon.toFixed(4) })
           setStatus('ready')
         } catch { setStatus('error') }
       },
@@ -272,123 +271,222 @@ function useAtmosphericSensor() {
   return { status, reading, sample }
 }
 
-// ─── UI Components ───────────────────────────────────────────────────────────
+// ─── Location Score ───────────────────────────────────────────────────────────
+// Combines GDELT social calm, elevation/remoteness, and live sensor readings
+// into a composite Aether Score (0–100) for the current GPS location.
+
+function socialCalmScore(negCount) {
+  return Math.max(15, Math.round(95 - Math.log10(negCount + 1) * 32))
+}
+
+function elevationScore(meters) {
+  if (meters == null) return null
+  return Math.min(95, Math.round(25 + Math.sqrt(Math.max(0, meters)) * 1.6))
+}
+
+function kineticCalmScore(dominantHz) {
+  if (dominantHz == null) return null
+  if (dominantHz < 0.1) return 90
+  if (dominantHz <= 5)  return 80
+  if (dominantHz <= 12) return 55
+  return 25
+}
+
+function magneticCalmScore(fluxVariance) {
+  if (fluxVariance == null) return null
+  const v = parseFloat(fluxVariance)
+  if (v < 0.5) return 88
+  if (v < 2.0) return 60
+  return 28
+}
+
+function emDensityScore(count) {
+  if (count == null) return null
+  // 0 towers → 95, 2 → 83, 10 → 68, 30 → 53, 100+ → 15
+  return Math.max(15, Math.round(95 - Math.log10(count + 1) * 40))
+}
+
+function compositeAether(layers) {
+  const valid = layers.filter(v => v != null)
+  return valid.length ? Math.round(valid.reduce((a, b) => a + b, 0) / valid.length) : null
+}
+
+function useLocationScore() {
+  const [status, setStatus] = useState('idle')
+  const [result, setResult] = useState(null)
+
+  const compute = useCallback(async (lat, lon, elevationM, kineticReading, magneticReading) => {
+    setStatus('computing')
+
+    // Reverse geocode — soft failure, falls back to 'Unknown'
+    let city = 'Unknown'
+    try {
+      const geoRes = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`
+      )
+      const geo = await geoRes.json()
+      city =
+        geo?.address?.city    ??
+        geo?.address?.town    ??
+        geo?.address?.village ??
+        geo?.address?.county  ??
+        geo?.display_name?.split(',')[0] ??
+        'Unknown'
+    } catch { /* proceed */ }
+
+    // Wikipedia — conflict article count for city (CORS-ok via origin=*)
+    // GDELT blocked all non-browser origins (403); Wikipedia MediaWiki API is public.
+    let negCount = null
+    let socialScoreVal = null
+    try {
+      const wq = encodeURIComponent(`(protest OR riot OR unrest OR conflict) "${city}"`)
+      const wikiRes = await fetch(
+        `https://en.wikipedia.org/w/api.php?action=query&list=search` +
+        `&srsearch=${wq}&srnamespace=0&srlimit=1&format=json&origin=*`
+      )
+      const wiki = await wikiRes.json()
+      negCount = wiki?.query?.searchinfo?.totalhits ?? 0
+      socialScoreVal = socialCalmScore(negCount)
+    } catch { /* Wikipedia unavailable */ }
+
+    // OSM Overpass — communication towers within 5 km radius
+    let emCount = null
+    let emScoreVal = null
+    try {
+      const oq =
+        `[out:json][timeout:15];` +
+        `(node["tower:type"="communication"](around:5000,${lat},${lon});` +
+        `way["tower:type"="communication"](around:5000,${lat},${lon}););` +
+        `out count;`
+      const osmRes = await fetch('https://overpass-api.de/api/interpreter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `data=${encodeURIComponent(oq)}`,
+      })
+      const osm = await osmRes.json()
+      emCount = parseInt(osm?.elements?.[0]?.tags?.total ?? '0', 10)
+      emScoreVal = emDensityScore(emCount)
+    } catch { /* Overpass unavailable */ }
+
+    const elev     = elevationScore(elevationM)
+    const kinetic  = kineticCalmScore(kineticReading?.dominantHz ?? null)
+    const magnetic = magneticCalmScore(magneticReading?.fluxVariance ?? null)
+
+    setResult({
+      city,
+      negCount,
+      elevationM,
+      emCount,
+      scores: { social: socialScoreVal, elev, em: emScoreVal, kinetic, magnetic },
+      aether: compositeAether([socialScoreVal, elev, emScoreVal, kinetic, magnetic]),
+    })
+    setStatus('ready')
+  }, [])
+
+  return { status, result, compute }
+}
+
+// ─── App ─────────────────────────────────────────────────────────────────────
 
 function TierBadge({ tier }) {
   if (!tier) return null
   return <span className={`tier-badge tier-${tier.id ?? tier.level}`}>{tier.label}{tier.note ? ` · ${tier.note}` : ''}</span>
 }
 
-function BufferProgress({ progress }) {
-  const pct = Math.round(progress * 100)
-  return (
-    <div className="buffer-wrap">
-      <div className="buffer-track">
-        <div className="buffer-fill" style={{ width: `${pct}%` }} />
-      </div>
-      <span className="buffer-label">{pct}%</span>
-    </div>
-  )
-}
-
-function Verdict({ zone, dominantHz }) {
+function ZoneBadge({ zone }) {
   if (!zone) return null
   const map = {
-    oasis:   { label: 'OASIS',       cls: 'verdict-oasis'   },
-    neutral: { label: 'NEUTRAL',     cls: 'verdict-neutral'  },
-    stress:  { label: 'STRESS NODE', cls: 'verdict-stress'   },
+    oasis:   { label: 'OASIS',       cls: 'zone-oasis'   },
+    neutral: { label: 'NEUTRAL',     cls: 'zone-neutral'  },
+    stress:  { label: 'STRESS NODE', cls: 'zone-stress'   },
   }
   const { label, cls } = map[zone]
+  return <span className={`zone-badge ${cls}`}>{label}</span>
+}
+
+function ZoneEnergyBars({ bins }) {
+  const energies = zoneEnergies(bins)
+  if (!energies) return null
+  const rows = [
+    { key: 'oasis',   label: 'Oasis',      range: '1–5 Hz',   color: '#34d399', pct: energies.oasis   },
+    { key: 'neutral', label: 'Neutral',     range: '5–12 Hz',  color: '#9ca3af', pct: energies.neutral },
+    { key: 'stress',  label: 'Stress Node', range: '12–20 Hz', color: '#f87171', pct: energies.stress  },
+  ]
   return (
-    <div className={`verdict ${cls}`}>
-      <span className="verdict-label">{label}</span>
-      {dominantHz != null && <span className="verdict-hz">Peak {dominantHz.toFixed(2)} Hz</span>}
+    <div className="zone-bars">
+      {rows.map(({ key, label, range, color, pct }) => (
+        <div key={key} className="zone-bar-row">
+          <span className="zone-bar-label" style={{ color }}>{label}</span>
+          <div className="zone-bar-track">
+            <div className="zone-bar-fill" style={{ width: `${pct}%`, background: color }} />
+          </div>
+          <span className="zone-bar-pct">{pct}%</span>
+          <span className="zone-bar-range">{range}</span>
+        </div>
+      ))}
     </div>
   )
 }
 
-function BalanceBar({ balance }) {
-  if (balance == null) return null
-  const stressPct = Math.round(balance * 100)
-  const calmPct = 100 - stressPct
-  return (
-    <div className="balance-wrap">
-      <span className="balance-lbl balance-lbl-calm">CALM</span>
-      <div className="balance-track">
-        <div className="balance-fill-calm"  style={{ width: `${calmPct}%` }} />
-        <div className="balance-fill-stress" style={{ width: `${stressPct}%` }} />
-      </div>
-      <span className="balance-lbl balance-lbl-stress">STRESS</span>
-    </div>
-  )
+const ZONE_INFO = {
+  oasis:   {
+    label: 'Oasis',
+    color: '#34d399', border: '#0d9488', bg: '#022c22',
+    desc:  'Natural ground resonance — forests, open fields, deep earth. Restorative frequency range.',
+  },
+  neutral: {
+    label: 'Neutral',
+    color: '#9ca3af', border: '#374151', bg: '#111827',
+    desc:  'Mixed field — natural and mechanical signals present. Ambiguous environment.',
+  },
+  stress:  {
+    label: 'Stress Node',
+    color: '#f87171', border: '#dc2626', bg: '#1f0a0a',
+    desc:  'Mechanical interference — HVAC, traffic, or industrial vibration detected.',
+  },
 }
 
-function SpectrumGraph({ bins, dominantHz, zone }) {
-  if (!bins || bins.length < 2) return null
-  const W = 300, H = 64
-
-  const toX = hz => (hz / SPECTRUM_MAX_HZ) * W
-  const toY = mag => (H - 4) - mag * (H - 8)
-
-  const points = bins
-    .map(({ hz, mag }) => `${toX(hz).toFixed(1)},${toY(mag).toFixed(1)}`)
-    .join(' ')
-
-  const lineColor = zone === 'oasis' ? '#34d399' : zone === 'stress' ? '#f87171' : '#9ca3af'
-  const peakX = dominantHz != null ? toX(dominantHz) : null
-
-  return (
-    <div className="spectrum-wrap">
-      <svg className="spectrum-svg" width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
-        <rect x="0"       y="0" width={toX(1)}            height={H} fill="#374151" opacity="0.4" />
-        <rect x={toX(1)}  y="0" width={toX(5)  - toX(1)}  height={H} fill="#0d9488" opacity="0.15" />
-        <rect x={toX(5)}  y="0" width={toX(12) - toX(5)}  height={H} fill="#6b7280" opacity="0.08" />
-        <rect x={toX(12)} y="0" width={toX(20) - toX(12)} height={H} fill="#dc2626" opacity="0.12" />
-        {peakX != null && (
-          <line x1={peakX.toFixed(1)} y1="2" x2={peakX.toFixed(1)} y2={H - 2}
-            stroke="#fff" strokeWidth="1" opacity="0.25" strokeDasharray="2,3" />
-        )}
-        <polyline points={points} fill="none" stroke={lineColor} strokeWidth="1.5" strokeLinejoin="round" />
-      </svg>
-      <div className="spectrum-axis">
-        <span>0</span><span>5</span><span>10</span><span>15</span><span>20 Hz</span>
-      </div>
-    </div>
-  )
-}
-
-function KineticCard({ sensor }) {
+function KineticCard({ sensor, tier }) {
   const { status, reading, start, stop } = sensor
-  const hasSpectrum = reading?.dominantHz != null
+  const zone = reading?.zone ?? null
+  const zInfo = zone ? ZONE_INFO[zone] : null
 
   return (
     <div className="card card-kinetic">
       <div className="card-header">
-        <span className="card-title">Kinetic</span>
-        <span className="card-sensation">Grounding / Weight</span>
+        <span className="card-title">Ground Signal</span>
+        <span className="card-sensation">Low-frequency vibration</span>
       </div>
 
-      {!hasSpectrum && status !== 'active' && (
-        <div className="card-metric"><span className="metric-idle">—</span></div>
-      )}
-      {status === 'active' && !hasSpectrum && (
-        <BufferProgress progress={reading?.progress ?? 0} />
-      )}
-      {hasSpectrum && (
-        <>
-          <Verdict zone={reading.zone} dominantHz={reading.dominantHz} />
-          <BalanceBar balance={reading.balance} />
-          <SpectrumGraph bins={reading.spectrum} dominantHz={reading.dominantHz} zone={reading.zone} />
-        </>
+      {status !== 'active' && (
+        <p className="protocol-hint">Place phone flat on concrete or stone · silence · allow 60 s</p>
       )}
 
-      <p className="protocol-hint">Place flat on concrete or stone · Silence · 60 s</p>
+      {status === 'active' && !reading?.dominantHz && (
+        <p className="metric-idle" style={{ margin: '0.6rem 0' }}>Listening…</p>
+      )}
+
+      {reading?.spectrum && <ZoneEnergyBars bins={reading.spectrum} />}
+
+      {zInfo && (
+        <div className="zone-verdict" style={{ background: zInfo.bg, borderColor: zInfo.border }}>
+          <div className="zone-verdict-top">
+            <span className="zone-verdict-name" style={{ color: zInfo.color }}>{zInfo.label}</span>
+            <span className="zone-verdict-hz">{reading.dominantHz.toFixed(2)} Hz</span>
+          </div>
+          <p className="zone-verdict-desc">{zInfo.desc}</p>
+        </div>
+      )}
+
       <button
         className={`card-btn ${status === 'active' ? 'btn-stop' : 'btn-start'}`}
         onClick={status === 'active' ? stop : start}
         disabled={status === 'pending' || status === 'error'}
       >
-        {status === 'active' ? 'Stop' : status === 'pending' ? 'Requesting…' : status === 'error' ? 'Unavailable' : 'Start Sensor'}
+        {status === 'active' ? 'Stop'
+          : status === 'pending' ? 'Requesting…'
+          : status === 'error'   ? 'Unavailable'
+          : 'Start Scan'}
       </button>
       {status === 'denied' && (
         <p className="card-hint">iOS: Settings → Safari → Motion &amp; Orientation Access</p>
@@ -398,7 +496,7 @@ function KineticCard({ sensor }) {
 }
 
 function MagneticCard({ sensor, tier }) {
-  const { status, reading, requestIOSPermission } = sensor
+  const { status, reading } = sensor
   return (
     <div className="card card-magnetic">
       <div className="card-header">
@@ -411,15 +509,9 @@ function MagneticCard({ sensor, tier }) {
           : <span className="metric-idle">{status === 'active' ? 'Warming up…' : '—'}</span>
         }
       </div>
-      {reading?.heading && <div className="card-sub">Heading {reading.heading}°</div>}
-      {reading && <div className="card-sub mode">{reading.mode}</div>}
-      {status === 'needs-permission' && (
-        <button className="card-btn btn-start" onClick={requestIOSPermission}>
-          Allow Compass Access
-        </button>
-      )}
+      {reading && <div className="card-sub">Clarity / Peace</div>}
       {status === 'unsupported' && (
-        <p className="card-hint">Magnetometer not available in this browser</p>
+        <p className="card-hint">Requires Android Chrome — Apple restricts raw magnetometer access on all iOS browsers</p>
       )}
     </div>
   )
@@ -431,15 +523,12 @@ function AtmosphericCard({ sensor, tier }) {
     <div className="card card-atmospheric">
       <div className="card-header">
         <span className="card-title">Atmospheric</span>
-        {tier
-          ? (
-            <span className="tier-group">
-              <span className={`tier-badge tier-${tier.level}`}>{tier.label}</span>
-              <span className={`tier-badge tier-${tier.trend}`}>{tier.trendLabel}</span>
-            </span>
-          )
-          : <span className="card-sensation">Freshness / Vitality</span>
-        }
+        {tier && (
+          <span className="tier-group">
+            <span className={`tier-badge tier-${tier.level}`}>{tier.label}</span>
+            <span className={`tier-badge tier-${tier.trend}`}>{tier.trendLabel}</span>
+          </span>
+        )}
       </div>
       <div className="card-metric">
         {reading
@@ -447,7 +536,8 @@ function AtmosphericCard({ sensor, tier }) {
           : <span className="metric-idle">{status === 'sampling' ? 'Locating…' : '—'}</span>
         }
       </div>
-      {reading?.deltaP && <div className="card-sub">ΔP {reading.deltaP} hPa</div>}
+      {reading?.deltaP && <div className="card-sub">ΔP {reading.deltaP} hPa · Freshness / Vitality</div>}
+      {reading && !reading.deltaP && <div className="card-sub">Freshness / Vitality</div>}
       {reading && <div className="card-sub">{reading.lat}, {reading.lon}</div>}
       <button
         className="card-btn btn-start"
@@ -463,7 +553,69 @@ function AtmosphericCard({ sensor, tier }) {
   )
 }
 
-const ZONE_LABEL = { oasis: 'Oasis', neutral: 'Neutral', stress: 'Stress' }
+function ScoreGauge({ label, value, detail }) {
+  if (value == null) return null
+  const color = value >= 70 ? '#34d399' : value >= 40 ? '#fbbf24' : '#f87171'
+  return (
+    <div className="score-row">
+      <div className="score-row-head">
+        <span className="score-row-label">{label}</span>
+        {detail && <span className="score-row-detail">{detail}</span>}
+        <span className="score-row-val" style={{ color }}>{value}</span>
+      </div>
+      <div className="score-bar-wrap">
+        <div className="score-bar" style={{ width: `${value}%`, background: color }} />
+      </div>
+    </div>
+  )
+}
+
+function LocationScoreCard({ atmospheric, kinetic, magnetic }) {
+  const { status, result, compute } = useLocationScore()
+  const reading = atmospheric.reading
+
+  const handleCompute = useCallback(() => {
+    if (!reading) return
+    compute(reading.lat, reading.lon, reading.elevationM, kinetic.reading, magnetic.reading)
+  }, [reading, kinetic.reading, magnetic.reading, compute])
+
+  return (
+    <div className="card card-score">
+      <div className="card-header">
+        <span className="card-title">Aether Score</span>
+        {result && <span className="score-location">{result.city}</span>}
+      </div>
+
+      {result?.aether != null && (
+        <div className="aether-score-wrap">
+          <span className="aether-score-val">{result.aether}</span>
+          <span className="aether-score-sub">/100</span>
+        </div>
+      )}
+
+      {result && (
+        <div className="score-breakdown">
+          <ScoreGauge label="Social"     value={result.scores.social}   detail={result.negCount != null ? `${result.negCount} wiki hits` : null} />
+          <ScoreGauge label="Terrain"    value={result.scores.elev}     detail={result.elevationM != null ? `${result.elevationM} m asl` : null} />
+          <ScoreGauge label="EM Density" value={result.scores.em}       detail={result.emCount != null ? `${result.emCount} towers/5 km` : null} />
+          <ScoreGauge label="Infrasound" value={result.scores.kinetic}  detail={kinetic.reading?.dominantHz != null ? `${kinetic.reading.dominantHz.toFixed(1)} Hz` : null} />
+          <ScoreGauge label="Magnetic"   value={result.scores.magnetic} detail={magnetic.reading ? `Δ${magnetic.reading.fluxVariance} μT` : null} />
+        </div>
+      )}
+
+      <button
+        className="card-btn btn-start"
+        onClick={handleCompute}
+        disabled={!reading || status === 'computing'}
+      >
+        {status === 'computing' ? 'Analysing…' : status === 'ready' ? 'Refresh Score' : 'Score Location'}
+      </button>
+
+      {!reading && <p className="card-hint">Sample atmosphere first to obtain GPS coordinates</p>}
+      {status === 'error' && <p className="card-hint">Could not reach scoring APIs — check network</p>}
+    </div>
+  )
+}
 
 export default function App() {
   const kinetic = useKineticSensor()
@@ -471,21 +623,22 @@ export default function App() {
   const atmospheric = useAtmosphericSensor()
   const [log, setLog] = useState([])
 
-  const { m, a, archetype } = useMemo(
+  const { k, m, a, archetype } = useMemo(
     () => classify(kinetic.reading, magnetic.reading, atmospheric.reading),
     [kinetic.reading, magnetic.reading, atmospheric.reading]
   )
 
   const capture = useCallback(() => {
+    const { archetype: arc } = classify(kinetic.reading, magnetic.reading, atmospheric.reading)
     setLog(prev => [{
       id: Date.now(),
       ts: new Date().toLocaleTimeString('en-US', { hour12: false }),
-      archetype: archetype?.name ?? null,
+      archetype: arc?.name ?? null,
       kinetic: kinetic.reading ? { ...kinetic.reading } : null,
       magnetic: magnetic.reading ? { ...magnetic.reading } : null,
       atmospheric: atmospheric.reading ? { ...atmospheric.reading } : null,
     }, ...prev].slice(0, 100))
-  }, [kinetic.reading, magnetic.reading, atmospheric.reading, archetype])
+  }, [kinetic.reading, magnetic.reading, atmospheric.reading])
 
   return (
     <div className="app">
@@ -495,9 +648,10 @@ export default function App() {
       </header>
 
       <div className="channels">
-        <KineticCard sensor={kinetic} />
+        <KineticCard sensor={kinetic} tier={k} />
         <MagneticCard sensor={magnetic} tier={m} />
         <AtmosphericCard sensor={atmospheric} tier={a} />
+        <LocationScoreCard atmospheric={atmospheric} kinetic={kinetic} magnetic={magnetic} />
       </div>
 
       {archetype && (
@@ -530,8 +684,10 @@ export default function App() {
                 <span className="log-ts">{e.ts}</span>
                 <span className="log-archetype">{e.archetype ?? '—'}</span>
                 <span className="log-k">
-                  {e.kinetic?.dominantHz != null ? `${e.kinetic.dominantHz.toFixed(2)} Hz` : '—'}
-                  {e.kinetic?.zone ? ` · ${ZONE_LABEL[e.kinetic.zone]}` : ''}
+                  {e.kinetic?.dominantHz != null
+                    ? `${e.kinetic.dominantHz.toFixed(2)} Hz`
+                    : '—'}
+                  {e.kinetic?.zone ? ` · ${e.kinetic.zone}` : ''}
                 </span>
                 <span className="log-m">{e.magnetic ? `Δ${e.magnetic.fluxVariance} μT` : '—'}</span>
                 <span className="log-a">{e.atmospheric ? `${e.atmospheric.pressureHpa} hPa` : '—'}</span>
