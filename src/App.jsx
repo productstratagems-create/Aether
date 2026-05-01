@@ -393,8 +393,16 @@ function useAtmosphericSensor() {
 
 // ─── Location Score ───────────────────────────────────────────────────────────
 
-function socialCalmScore(negCount) {
-  return Math.max(15, Math.round(95 - Math.log10(negCount + 1) * 32))
+function policeScore(count) {
+  if (count == null) return null
+  // 0 incidents → 90, 3 → 62, 8 → 15 (clamped to 20)
+  return Math.max(20, Math.round(90 - count * 9.3))
+}
+
+function blueskyScore(count) {
+  if (count == null) return null
+  // 0 posts → 88, 5 → 74, 15 → 47, 25 → 20
+  return Math.max(20, Math.round(88 - count * 2.7))
 }
 
 function elevationScore(meters) {
@@ -450,17 +458,55 @@ function useLocationScore() {
         'Unknown'
     } catch { /* proceed */ }
 
-    let negCount = null, socialScoreVal = null
+    // Politiloggen — try REST (geo-filtered), fall back to RSS, soft-fail either way
+    let policeCount = null, policeScoreVal = null
     try {
-      const wq      = encodeURIComponent(`(protest OR riot OR unrest OR conflict) "${city}"`)
-      const wikiRes = await fetch(
-        `https://en.wikipedia.org/w/api.php?action=query&list=search` +
-        `&srsearch=${wq}&srnamespace=0&srlimit=1&format=json&origin=*`
+      let fetched = false
+      try {
+        const polRes = await fetch(
+          `https://api.politiet.no/politiloggen/v1/hendelser?lat=${lat}&lon=${lon}&radius=5000`,
+          { headers: { Accept: 'application/json' } }
+        )
+        if (polRes.ok) {
+          const polData = await polRes.json()
+          const cutoff  = Date.now() - 24 * 3600 * 1000
+          const items   = Array.isArray(polData) ? polData : (polData?.items ?? polData?.hendelser ?? [])
+          policeCount   = items.filter(h => new Date(h.created ?? h.tid ?? h.timestamp).getTime() > cutoff).length
+          fetched = true
+        }
+      } catch { /* CORS or network — try RSS */ }
+
+      if (!fetched) {
+        const rssRes = await fetch('https://api.politiet.no/politiloggen/v1/rss')
+        const xml    = new DOMParser().parseFromString(await rssRes.text(), 'text/xml')
+        const cutoff = Date.now() - 24 * 3600 * 1000
+        policeCount  = Array.from(xml.querySelectorAll('item'))
+          .filter(item => {
+            const pub  = item.querySelector('pubDate')?.textContent
+            const text = (item.querySelector('title')?.textContent ?? '') +
+                         (item.querySelector('description')?.textContent ?? '')
+            return pub && new Date(pub).getTime() > cutoff &&
+                   text.toLowerCase().includes(city.toLowerCase())
+          }).length
+      }
+      policeScoreVal = policeScore(policeCount)
+    } catch { /* Politiloggen unavailable */ }
+
+    // Bluesky — public AT Protocol search, no auth required
+    let bskyCount = null, bskyScoreVal = null
+    try {
+      const since  = new Date(Date.now() - 24 * 3600 * 1000).toISOString()
+      const bskyQ  = encodeURIComponent(
+        `${city} (uro OR støy OR protest OR demonstrasjon OR bråk OR konflikt)`
       )
-      const wiki     = await wikiRes.json()
-      negCount       = wiki?.query?.searchinfo?.totalhits ?? 0
-      socialScoreVal = socialCalmScore(negCount)
-    } catch { /* Wikipedia unavailable */ }
+      const bskyRes = await fetch(
+        `https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts` +
+        `?q=${bskyQ}&limit=25&since=${since}&lang=no`
+      )
+      const bsky = await bskyRes.json()
+      bskyCount  = bsky?.posts?.length ?? 0
+      bskyScoreVal = blueskyScore(bskyCount)
+    } catch { /* Bluesky unavailable */ }
 
     let emCount = null, emScoreVal = null
     try {
@@ -484,9 +530,9 @@ function useLocationScore() {
     const acoustic = acousticCalmScore(acousticReading?.dominantHz ?? null)
 
     setResult({
-      city, negCount, elevationM, emCount,
-      scores: { social: socialScoreVal, elev, em: emScoreVal, kinetic, acoustic },
-      aether: compositeAether([socialScoreVal, elev, emScoreVal, kinetic, acoustic]),
+      city, policeCount, bskyCount, elevationM, emCount,
+      scores: { police: policeScoreVal, bluesky: bskyScoreVal, elev, em: emScoreVal, kinetic, acoustic },
+      aether: compositeAether([policeScoreVal, bskyScoreVal, elev, emScoreVal, kinetic, acoustic]),
     })
     setStatus('ready')
   }, [])
@@ -707,9 +753,10 @@ function LocationScoreCard({ atmospheric, kinetic, acoustic }) {
 
       {result && (
         <div className="score-breakdown">
-          <ScoreGauge label="Social"     value={result.scores.social}   detail={result.negCount   != null ? `${result.negCount} wiki hits`                          : null} />
-          <ScoreGauge label="Terrain"    value={result.scores.elev}     detail={result.elevationM != null ? `${result.elevationM} m asl`                            : null} />
-          <ScoreGauge label="EM Density" value={result.scores.em}       detail={result.emCount    != null ? `${result.emCount} towers/5 km`                         : null} />
+          <ScoreGauge label="Police Log" value={result.scores.police}   detail={result.policeCount != null ? `${result.policeCount} hendelser/24h`                  : null} />
+          <ScoreGauge label="Bluesky"    value={result.scores.bluesky}  detail={result.bskyCount   != null ? `${result.bskyCount} innlegg/24h`                      : null} />
+          <ScoreGauge label="Terrain"    value={result.scores.elev}     detail={result.elevationM  != null ? `${result.elevationM} m asl`                           : null} />
+          <ScoreGauge label="EM Density" value={result.scores.em}       detail={result.emCount     != null ? `${result.emCount} towers/5 km`                        : null} />
           <ScoreGauge label="Ground"     value={result.scores.kinetic}  detail={kinetic.reading?.dominantHz  != null ? `${kinetic.reading.dominantHz.toFixed(1)} Hz`  : null} />
           <ScoreGauge label="Acoustic"   value={result.scores.acoustic} detail={acoustic.reading?.dominantHz != null ? `${acoustic.reading.dominantHz.toFixed(1)} Hz` : null} />
         </div>
