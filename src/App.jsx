@@ -411,6 +411,12 @@ function vegvesenScore(count) {
   return Math.max(20, Math.round(88 - count * 4.5))
 }
 
+function airQualityScore(aqi) {
+  if (aqi == null) return null
+  // European AQI: 0 → 92, 20 → 74, 40 → 56, 60 → 38, 80+ → 20
+  return Math.max(20, Math.round(92 - aqi * 0.9))
+}
+
 function elevationScore(meters) {
   if (meters == null) return null
   return Math.min(95, Math.round(25 + Math.sqrt(Math.max(0, meters)) * 1.6))
@@ -539,6 +545,19 @@ function useLocationScore() {
       vegScoreVal = vegvesenScore(vegCount)
     } catch { /* NVDB unavailable — soft-fail */ }
 
+    // Open-Meteo Air Quality — European AQI + PM2.5
+    let aqiVal = null, pm25Val = null, airScoreVal = null
+    try {
+      const aqRes = await fetch(
+        `https://air-quality-api.open-meteo.com/v1/air-quality` +
+        `?latitude=${lat}&longitude=${lon}&current=european_aqi,pm2_5`
+      )
+      const aqData = await aqRes.json()
+      aqiVal      = aqData?.current?.european_aqi ?? null
+      pm25Val     = aqData?.current?.pm2_5        ?? null
+      airScoreVal = airQualityScore(aqiVal)
+    } catch { /* Open-Meteo AQ unavailable — soft-fail */ }
+
     let emCount = null, emScoreVal = null
     try {
       const oq =
@@ -561,9 +580,9 @@ function useLocationScore() {
     const acoustic = acousticCalmScore(acousticReading?.dominantHz ?? null)
 
     setResult({
-      city, policeCount, bskyCount, vegCount, elevationM, emCount,
-      scores: { police: policeScoreVal, bluesky: bskyScoreVal, traffic: vegScoreVal, elev, em: emScoreVal, kinetic, acoustic },
-      aether: compositeAether([policeScoreVal, bskyScoreVal, vegScoreVal, elev, emScoreVal, kinetic, acoustic]),
+      city, policeCount, bskyCount, vegCount, aqiVal, pm25Val, elevationM, emCount,
+      scores: { police: policeScoreVal, bluesky: bskyScoreVal, traffic: vegScoreVal, air: airScoreVal, elev, em: emScoreVal, kinetic, acoustic },
+      aether: compositeAether([policeScoreVal, bskyScoreVal, vegScoreVal, airScoreVal, elev, emScoreVal, kinetic, acoustic]),
     })
     setStatus('ready')
   }, [])
@@ -784,13 +803,14 @@ function LocationScoreCard({ atmospheric, kinetic, acoustic }) {
 
       {result && (
         <div className="score-breakdown">
-          <ScoreGauge label="Police Log" value={result.scores.police}   detail={result.policeCount != null ? `${result.policeCount} hendelser/24h`  : null} />
-          <ScoreGauge label="Bluesky"    value={result.scores.bluesky}  detail={result.bskyCount   != null ? `${result.bskyCount} innlegg/24h`     : null} />
-          <ScoreGauge label="Traffic"    value={result.scores.traffic}  detail={result.vegCount    != null ? `${result.vegCount} vegarbeid/5 km`    : null} />
-          <ScoreGauge label="Terrain"    value={result.scores.elev}     detail={result.elevationM  != null ? `${result.elevationM} m asl`           : null} />
-          <ScoreGauge label="EM Density" value={result.scores.em}       detail={result.emCount     != null ? `${result.emCount} towers/5 km`        : null} />
-          <ScoreGauge label="Ground"     value={result.scores.kinetic}  detail={kinetic.reading?.dominantHz  != null ? `${kinetic.reading.dominantHz.toFixed(1)} Hz`  : null} />
-          <ScoreGauge label="Acoustic"   value={result.scores.acoustic} detail={acoustic.reading?.dominantHz != null ? `${acoustic.reading.dominantHz.toFixed(1)} Hz` : null} />
+          <ScoreGauge label="Police Log"  value={result.scores.police}   detail={result.policeCount != null ? `${result.policeCount} hendelser/24h` : null} />
+          <ScoreGauge label="Bluesky"     value={result.scores.bluesky}  detail={result.bskyCount   != null ? `${result.bskyCount} innlegg/24h`    : null} />
+          <ScoreGauge label="Traffic"     value={result.scores.traffic}  detail={result.vegCount    != null ? `${result.vegCount} vegarbeid/5 km`  : null} />
+          <ScoreGauge label="Air Quality" value={result.scores.air}      detail={result.aqiVal      != null ? `AQI ${result.aqiVal}${result.pm25Val != null ? ` · PM2.5 ${result.pm25Val.toFixed(1)}` : ''}` : null} />
+          <ScoreGauge label="Terrain"     value={result.scores.elev}     detail={result.elevationM  != null ? `${result.elevationM} m asl`          : null} />
+          <ScoreGauge label="EM Density"  value={result.scores.em}       detail={result.emCount     != null ? `${result.emCount} towers/5 km`       : null} />
+          <ScoreGauge label="Ground"      value={result.scores.kinetic}  detail={kinetic.reading?.dominantHz  != null ? `${kinetic.reading.dominantHz.toFixed(1)} Hz`  : null} />
+          <ScoreGauge label="Acoustic"    value={result.scores.acoustic} detail={acoustic.reading?.dominantHz != null ? `${acoustic.reading.dominantHz.toFixed(1)} Hz` : null} />
         </div>
       )}
 
