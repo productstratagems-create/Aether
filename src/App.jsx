@@ -405,6 +405,12 @@ function blueskyScore(count) {
   return Math.max(20, Math.round(88 - count * 2.7))
 }
 
+function vegvesenScore(count) {
+  if (count == null) return null
+  // 0 works → 88, 3 → 75, 8 → 52, 15+ → 20
+  return Math.max(20, Math.round(88 - count * 4.5))
+}
+
 function elevationScore(meters) {
   if (meters == null) return null
   return Math.min(95, Math.round(25 + Math.sqrt(Math.max(0, meters)) * 1.6))
@@ -508,6 +514,31 @@ function useLocationScore() {
       bskyScoreVal = blueskyScore(bskyCount)
     } catch { /* Bluesky unavailable */ }
 
+    // Statens Vegvesen NVDB — active road works (type 596) within ~5 km bounding box
+    let vegCount = null, vegScoreVal = null
+    try {
+      const latN  = parseFloat(lat)
+      const lonN  = parseFloat(lon)
+      const dLat  = 0.045
+      const dLon  = 0.045 / Math.cos((latN * Math.PI) / 180)
+      const bbox  = [
+        (lonN - dLon).toFixed(5), (latN - dLat).toFixed(5),
+        (lonN + dLon).toFixed(5), (latN + dLat).toFixed(5),
+      ].join(',')
+      const vegRes = await fetch(
+        `https://nvdbapiles-v3.atlas.vegvesen.no/vegobjekter/596` +
+        `?kartutsnitt=${bbox}&inkluder=metadata&antall=25`,
+        { headers: { Accept: 'application/json', 'X-Client': 'Aether/1.0' } }
+      )
+      const vegData = await vegRes.json()
+      const now = Date.now()
+      vegCount = (vegData?.objekter ?? []).filter(o => {
+        const end = o?.metadata?.sluttdato
+        return !end || new Date(end).getTime() > now
+      }).length
+      vegScoreVal = vegvesenScore(vegCount)
+    } catch { /* NVDB unavailable — soft-fail */ }
+
     let emCount = null, emScoreVal = null
     try {
       const oq =
@@ -530,9 +561,9 @@ function useLocationScore() {
     const acoustic = acousticCalmScore(acousticReading?.dominantHz ?? null)
 
     setResult({
-      city, policeCount, bskyCount, elevationM, emCount,
-      scores: { police: policeScoreVal, bluesky: bskyScoreVal, elev, em: emScoreVal, kinetic, acoustic },
-      aether: compositeAether([policeScoreVal, bskyScoreVal, elev, emScoreVal, kinetic, acoustic]),
+      city, policeCount, bskyCount, vegCount, elevationM, emCount,
+      scores: { police: policeScoreVal, bluesky: bskyScoreVal, traffic: vegScoreVal, elev, em: emScoreVal, kinetic, acoustic },
+      aether: compositeAether([policeScoreVal, bskyScoreVal, vegScoreVal, elev, emScoreVal, kinetic, acoustic]),
     })
     setStatus('ready')
   }, [])
@@ -753,10 +784,11 @@ function LocationScoreCard({ atmospheric, kinetic, acoustic }) {
 
       {result && (
         <div className="score-breakdown">
-          <ScoreGauge label="Police Log" value={result.scores.police}   detail={result.policeCount != null ? `${result.policeCount} hendelser/24h`                  : null} />
-          <ScoreGauge label="Bluesky"    value={result.scores.bluesky}  detail={result.bskyCount   != null ? `${result.bskyCount} innlegg/24h`                      : null} />
-          <ScoreGauge label="Terrain"    value={result.scores.elev}     detail={result.elevationM  != null ? `${result.elevationM} m asl`                           : null} />
-          <ScoreGauge label="EM Density" value={result.scores.em}       detail={result.emCount     != null ? `${result.emCount} towers/5 km`                        : null} />
+          <ScoreGauge label="Police Log" value={result.scores.police}   detail={result.policeCount != null ? `${result.policeCount} hendelser/24h`  : null} />
+          <ScoreGauge label="Bluesky"    value={result.scores.bluesky}  detail={result.bskyCount   != null ? `${result.bskyCount} innlegg/24h`     : null} />
+          <ScoreGauge label="Traffic"    value={result.scores.traffic}  detail={result.vegCount    != null ? `${result.vegCount} vegarbeid/5 km`    : null} />
+          <ScoreGauge label="Terrain"    value={result.scores.elev}     detail={result.elevationM  != null ? `${result.elevationM} m asl`           : null} />
+          <ScoreGauge label="EM Density" value={result.scores.em}       detail={result.emCount     != null ? `${result.emCount} towers/5 km`        : null} />
           <ScoreGauge label="Ground"     value={result.scores.kinetic}  detail={kinetic.reading?.dominantHz  != null ? `${kinetic.reading.dominantHz.toFixed(1)} Hz`  : null} />
           <ScoreGauge label="Acoustic"   value={result.scores.acoustic} detail={acoustic.reading?.dominantHz != null ? `${acoustic.reading.dominantHz.toFixed(1)} Hz` : null} />
         </div>
