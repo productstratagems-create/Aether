@@ -448,6 +448,57 @@ function compositeAether(layers) {
   return valid.length ? Math.round(valid.reduce((a, b) => a + b, 0) / valid.length) : null
 }
 
+const SCORE_LABELS = {
+  police: 'Police Log', bluesky: 'Bluesky', traffic: 'Traffic',
+  air: 'Air Quality',   elev: 'Terrain',    em: 'EM Density',
+  kinetic: 'Ground',    acoustic: 'Acoustic',
+}
+
+const HISTORY_KEY = 'aether-locations'
+
+function useLocationHistory() {
+  const [history, setHistory] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(HISTORY_KEY) ?? '[]') }
+    catch { return [] }
+  })
+  const save = useCallback(entry => {
+    setHistory(prev => {
+      const next = [entry, ...prev].slice(0, 100)
+      try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)) } catch { /* quota */ }
+      return next
+    })
+  }, [])
+  const remove = useCallback(id => {
+    setHistory(prev => {
+      const next = prev.filter(e => e.id !== id)
+      try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)) } catch { /* */ }
+      return next
+    })
+  }, [])
+  const clear = useCallback(() => {
+    try { localStorage.removeItem(HISTORY_KEY) } catch { /* */ }
+    setHistory([])
+  }, [])
+  return { history, save, remove, clear }
+}
+
+function ScoreSparkline({ values }) {
+  if (!values || values.length < 2) return null
+  const max = Math.max(...values), min = Math.min(...values)
+  const range = Math.max(max - min, 5)
+  const W = 52, H = 16
+  const pts = values.map((v, i) => {
+    const x = (i / (values.length - 1)) * W
+    const y = H - ((v - min) / range) * (H - 2) - 1
+    return `${x.toFixed(1)},${y.toFixed(1)}`
+  }).join(' ')
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="score-sparkline">
+      <polyline points={pts} fill="none" stroke="#7c3aed" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 function useLocationScore() {
   const [status, setStatus] = useState('idle')
   const [result, setResult] = useState(null)
@@ -778,14 +829,71 @@ function ScoreGauge({ label, value, detail }) {
   )
 }
 
-function LocationScoreCard({ atmospheric, kinetic, acoustic }) {
+function ComparePanel({ entries, onClose }) {
+  const [a, b] = entries
+  return (
+    <div className="compare-panel">
+      <div className="compare-header">
+        <span className="compare-title">Compare</span>
+        <button className="compare-close" onClick={onClose}>✕</button>
+      </div>
+      <div className="compare-cols">
+        {[a, b].map(entry => (
+          <div key={entry.id} className="compare-col">
+            <div className="compare-col-head">
+              <span className="compare-city">{entry.city}</span>
+              <span className="compare-score">{entry.aether ?? '—'}</span>
+            </div>
+            {Object.entries(entry.scores)
+              .filter(([, v]) => v != null)
+              .map(([key, value]) => (
+                <ScoreGauge key={key} label={SCORE_LABELS[key] ?? key} value={value} />
+              ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function LocationScoreCard({ atmospheric, kinetic, acoustic, onSave, history }) {
   const { status, result, compute } = useLocationScore()
   const reading = atmospheric.reading
+  const savedRef = useRef(null)
+  const [delta, setDelta] = useState(null)
 
   const handleCompute = useCallback(() => {
     if (!reading) return
     compute(reading.lat, reading.lon, reading.elevationM, kinetic.reading, acoustic.reading)
   }, [reading, kinetic.reading, acoustic.reading, compute])
+
+  useEffect(() => {
+    if (status !== 'ready' || !result || result === savedRef.current) return
+    savedRef.current = result
+    const prevAether = history[0]?.aether ?? null
+    const d = result.aether != null && prevAether != null ? result.aether - prevAether : null
+    setDelta(d)
+    onSave({
+      id: Date.now(),
+      ts: new Date().toISOString(),
+      city: result.city,
+      lat: atmospheric.reading?.lat ?? null,
+      lon: atmospheric.reading?.lon ?? null,
+      aether: result.aether,
+      scores: result.scores,
+      counts: {
+        policeCount: result.policeCount, bskyCount: result.bskyCount,
+        vegCount: result.vegCount,       aqiVal: result.aqiVal,
+        pm25Val: result.pm25Val,         elevationM: result.elevationM,
+        emCount: result.emCount,
+      },
+    })
+  }, [status, result]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const sparkValues = [
+    ...[...history].slice(0, 4).map(e => e.aether).filter(v => v != null).reverse(),
+    ...(result?.aether != null ? [result.aether] : []),
+  ]
 
   return (
     <div className="card card-score">
@@ -798,19 +906,28 @@ function LocationScoreCard({ atmospheric, kinetic, acoustic }) {
         <div className="aether-score-wrap">
           <span className="aether-score-val">{result.aether}</span>
           <span className="aether-score-sub">/100</span>
+          {delta != null && (
+            <span className="aether-delta" style={{
+              color: delta > 2 ? '#34d399' : delta < -2 ? '#f87171' : '#6b7280',
+            }}>
+              {delta > 2 ? `▲ ${delta}` : delta < -2 ? `▼ ${Math.abs(delta)}` : '→'}
+            </span>
+          )}
+          <div style={{ flex: 1 }} />
+          {sparkValues.length >= 2 && <ScoreSparkline values={sparkValues} />}
         </div>
       )}
 
       {result && (
         <div className="score-breakdown">
-          <ScoreGauge label="Police Log" value={result.scores.police}   detail={result.policeCount != null ? `${result.policeCount} hendelser/24h`  : null} />
-          <ScoreGauge label="Bluesky"    value={result.scores.bluesky}  detail={result.bskyCount   != null ? `${result.bskyCount} innlegg/24h`     : null} />
-          <ScoreGauge label="Traffic"      value={result.scores.traffic}  detail={result.vegCount != null ? `${result.vegCount} vegarbeid/5 km` : null} />
-          <ScoreGauge label="Air Quality" value={result.scores.air}      detail={result.aqiVal   != null ? `AQI ${result.aqiVal}${result.pm25Val != null ? ` · PM2.5 ${result.pm25Val.toFixed(1)}` : ''}` : null} />
-          <ScoreGauge label="Terrain"    value={result.scores.elev}     detail={result.elevationM  != null ? `${result.elevationM} m asl`           : null} />
-          <ScoreGauge label="EM Density" value={result.scores.em}       detail={result.emCount     != null ? `${result.emCount} towers/5 km`                        : null} />
-          <ScoreGauge label="Ground"     value={result.scores.kinetic}  detail={kinetic.reading?.dominantHz  != null ? `${kinetic.reading.dominantHz.toFixed(1)} Hz`  : null} />
-          <ScoreGauge label="Acoustic"   value={result.scores.acoustic} detail={acoustic.reading?.dominantHz != null ? `${acoustic.reading.dominantHz.toFixed(1)} Hz` : null} />
+          <ScoreGauge label="Police Log"  value={result.scores.police}   detail={result.policeCount != null ? `${result.policeCount} hendelser/24h` : null} />
+          <ScoreGauge label="Bluesky"     value={result.scores.bluesky}  detail={result.bskyCount   != null ? `${result.bskyCount} innlegg/24h`    : null} />
+          <ScoreGauge label="Traffic"     value={result.scores.traffic}  detail={result.vegCount    != null ? `${result.vegCount} vegarbeid/5 km`  : null} />
+          <ScoreGauge label="Air Quality" value={result.scores.air}      detail={result.aqiVal      != null ? `AQI ${result.aqiVal}${result.pm25Val != null ? ` · PM2.5 ${result.pm25Val.toFixed(1)}` : ''}` : null} />
+          <ScoreGauge label="Terrain"     value={result.scores.elev}     detail={result.elevationM  != null ? `${result.elevationM} m asl`          : null} />
+          <ScoreGauge label="EM Density"  value={result.scores.em}       detail={result.emCount     != null ? `${result.emCount} towers/5 km`       : null} />
+          <ScoreGauge label="Ground"      value={result.scores.kinetic}  detail={kinetic.reading?.dominantHz  != null ? `${kinetic.reading.dominantHz.toFixed(1)} Hz`  : null} />
+          <ScoreGauge label="Acoustic"    value={result.scores.acoustic} detail={acoustic.reading?.dominantHz != null ? `${acoustic.reading.dominantHz.toFixed(1)} Hz` : null} />
         </div>
       )}
 
@@ -828,21 +945,103 @@ function LocationScoreCard({ atmospheric, kinetic, acoustic }) {
   )
 }
 
+function LocationHistoryPanel({ history, onRemove, onClear }) {
+  const [expandedId, setExpandedId] = useState(null)
+  const [pinned, setPinned]         = useState([])
+
+  const togglePin = useCallback(id => {
+    setPinned(prev =>
+      prev.includes(id)
+        ? prev.filter(p => p !== id)
+        : prev.length >= 2 ? [prev[1], id] : [...prev, id]
+    )
+  }, [])
+
+  const pinnedEntries = pinned.map(id => history.find(e => e.id === id)).filter(Boolean)
+
+  if (history.length === 0) return null
+
+  return (
+    <section className="history-section">
+      <div className="history-section-head">
+        <span className="history-section-title">Saved Locations</span>
+        <span className="history-section-count">{history.length}</span>
+        <button className="history-clear-btn" onClick={onClear}>Clear all</button>
+      </div>
+
+      {pinnedEntries.length === 2 && (
+        <ComparePanel entries={pinnedEntries} onClose={() => setPinned([])} />
+      )}
+      {pinnedEntries.length === 1 && (
+        <p className="compare-hint">Pin one more location to compare ⊕</p>
+      )}
+
+      <div className="history-list">
+        {history.map((entry, i) => {
+          const prev = history[i + 1]
+          const d    = entry.aether != null && prev?.aether != null ? entry.aether - prev.aether : null
+          const isPinned    = pinned.includes(entry.id)
+          const isExpanded  = expandedId === entry.id
+          const dt = new Date(entry.ts)
+          const timeStr = dt.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })
+          const dateStr = dt.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' })
+          return (
+            <div key={entry.id} className={`history-entry${isExpanded ? ' expanded' : ''}`}>
+              <div className="history-entry-header" onClick={() => setExpandedId(p => p === entry.id ? null : entry.id)}>
+                <span className="history-entry-city">{entry.city}</span>
+                <span className="history-entry-score" style={{
+                  color: (entry.aether ?? 0) >= 70 ? '#34d399' : (entry.aether ?? 0) >= 40 ? '#fbbf24' : '#f87171',
+                }}>{entry.aether ?? '—'}</span>
+                {d != null && (
+                  <span className="history-entry-delta" style={{ color: d > 2 ? '#34d399' : d < -2 ? '#f87171' : '#6b7280' }}>
+                    {d > 2 ? `▲${d}` : d < -2 ? `▼${Math.abs(d)}` : '→'}
+                  </span>
+                )}
+                <span className="history-entry-time">{dateStr} {timeStr}</span>
+                <button
+                  className={`history-pin-btn${isPinned ? ' active' : ''}`}
+                  onClick={e => { e.stopPropagation(); togglePin(entry.id) }}
+                  title={isPinned ? 'Unpin' : 'Pin to compare'}
+                >⊕</button>
+                <button
+                  className="history-delete-btn"
+                  onClick={e => { e.stopPropagation(); onRemove(entry.id) }}
+                  title="Remove"
+                >✕</button>
+              </div>
+              {isExpanded && (
+                <div className="history-entry-body">
+                  {Object.entries(entry.scores)
+                    .filter(([, v]) => v != null)
+                    .map(([key, value]) => (
+                      <ScoreGauge key={key} label={SCORE_LABELS[key] ?? key} value={value} />
+                    ))}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 export default function App() {
   const kinetic     = useKineticSensor()
   const acoustic    = useAcousticSensor()
   const atmospheric = useAtmosphericSensor()
+  const { history, save, remove, clear } = useLocationHistory()
   const [log, setLog] = useState([])
 
   const { k, a, archetype } = useMemo(
-    () => classify(kinetic.reading, null, atmospheric.reading),
-    [kinetic.reading, atmospheric.reading]
+    () => classify(kinetic.reading, null, atmospheric.reading, acoustic.reading),
+    [kinetic.reading, atmospheric.reading, acoustic.reading]
   )
 
   const capture = useCallback(() => {
-    const { archetype: arc } = classify(kinetic.reading, null, atmospheric.reading)
+    const { archetype: arc } = classify(kinetic.reading, null, atmospheric.reading, acoustic.reading)
     setLog(prev => [{
       id:          Date.now(),
       ts:          new Date().toLocaleTimeString('en-US', { hour12: false }),
@@ -864,7 +1063,7 @@ export default function App() {
         <KineticCard  sensor={kinetic} />
         <AcousticCard sensor={acoustic} />
         <AtmosphericCard sensor={atmospheric} tier={a} />
-        <LocationScoreCard atmospheric={atmospheric} kinetic={kinetic} acoustic={acoustic} />
+        <LocationScoreCard atmospheric={atmospheric} kinetic={kinetic} acoustic={acoustic} onSave={save} history={history} />
       </div>
 
       {archetype && (
@@ -908,6 +1107,8 @@ export default function App() {
           </ul>
         )
       }
+
+      <LocationHistoryPanel history={history} onRemove={remove} onClear={clear} />
     </div>
   )
 }
