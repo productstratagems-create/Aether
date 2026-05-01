@@ -438,6 +438,12 @@ function acousticCalmScore(dominantHz) {
   return 25
 }
 
+function redditScore(count) {
+  if (count == null) return null
+  // 0 posts → 86, 5 → 71, 15 → 44, 25+ → 20
+  return Math.max(20, Math.round(86 - count * 2.6))
+}
+
 function emDensityScore(count) {
   if (count == null) return null
   return Math.max(15, Math.round(95 - Math.log10(count + 1) * 40))
@@ -449,7 +455,7 @@ function compositeAether(layers) {
 }
 
 const SCORE_LABELS = {
-  police: 'Police Log', bluesky: 'Bluesky', traffic: 'Traffic',
+  police: 'Police Log', bluesky: 'Bluesky', reddit: 'Reddit', traffic: 'Traffic',
   air: 'Air Quality',   elev: 'Terrain',    em: 'EM Density',
   kinetic: 'Ground',    acoustic: 'Acoustic',
 }
@@ -571,6 +577,20 @@ function useLocationScore() {
       bskyScoreVal = blueskyScore(bskyCount)
     } catch { /* Bluesky unavailable */ }
 
+    // Reddit — r/norge + r/oslo public search, no auth required
+    let redditCount = null, redditScoreVal = null
+    try {
+      const rdQ   = encodeURIComponent(city)
+      const rdRes = await fetch(
+        `https://www.reddit.com/r/norge+oslo/search.json` +
+        `?q=${rdQ}&sort=new&restrict_sr=on&t=day&limit=25&raw_json=1`,
+        { headers: { Accept: 'application/json' } }
+      )
+      const rd = await rdRes.json()
+      redditCount  = rd?.data?.children?.length ?? 0
+      redditScoreVal = redditScore(redditCount)
+    } catch { /* Reddit unavailable — soft-fail */ }
+
     // Statens Vegvesen NVDB — active road works (type 596) within ~5 km bounding box
     let vegCount = null, vegScoreVal = null
     try {
@@ -631,9 +651,9 @@ function useLocationScore() {
     const acoustic = acousticCalmScore(acousticReading?.dominantHz ?? null)
 
     setResult({
-      city, policeCount, bskyCount, vegCount, aqiVal, pm25Val, elevationM, emCount,
-      scores: { police: policeScoreVal, bluesky: bskyScoreVal, traffic: vegScoreVal, air: airScoreVal, elev, em: emScoreVal, kinetic, acoustic },
-      aether: compositeAether([policeScoreVal, bskyScoreVal, vegScoreVal, airScoreVal, elev, emScoreVal, kinetic, acoustic]),
+      city, policeCount, bskyCount, redditCount, vegCount, aqiVal, pm25Val, elevationM, emCount,
+      scores: { police: policeScoreVal, bluesky: bskyScoreVal, reddit: redditScoreVal, traffic: vegScoreVal, air: airScoreVal, elev, em: emScoreVal, kinetic, acoustic },
+      aether: compositeAether([policeScoreVal, bskyScoreVal, redditScoreVal, vegScoreVal, airScoreVal, elev, emScoreVal, kinetic, acoustic]),
     })
     setStatus('ready')
   }, [])
@@ -883,9 +903,9 @@ function LocationScoreCard({ atmospheric, kinetic, acoustic, onSave, history }) 
       scores: result.scores,
       counts: {
         policeCount: result.policeCount, bskyCount: result.bskyCount,
-        vegCount: result.vegCount,       aqiVal: result.aqiVal,
-        pm25Val: result.pm25Val,         elevationM: result.elevationM,
-        emCount: result.emCount,
+        redditCount: result.redditCount, vegCount: result.vegCount,
+        aqiVal: result.aqiVal,           pm25Val: result.pm25Val,
+        elevationM: result.elevationM,   emCount: result.emCount,
       },
     })
   }, [status, result]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -920,8 +940,9 @@ function LocationScoreCard({ atmospheric, kinetic, acoustic, onSave, history }) 
 
       {result && (
         <div className="score-breakdown">
-          <ScoreGauge label="Police Log"  value={result.scores.police}   detail={result.policeCount != null ? `${result.policeCount} hendelser/24h` : null} />
-          <ScoreGauge label="Bluesky"     value={result.scores.bluesky}  detail={result.bskyCount   != null ? `${result.bskyCount} innlegg/24h`    : null} />
+          <ScoreGauge label="Police Log"  value={result.scores.police}   detail={result.policeCount  != null ? `${result.policeCount} hendelser/24h`  : null} />
+          <ScoreGauge label="Bluesky"     value={result.scores.bluesky}  detail={result.bskyCount    != null ? `${result.bskyCount} innlegg/24h`     : null} />
+          <ScoreGauge label="Reddit"      value={result.scores.reddit}   detail={result.redditCount  != null ? `${result.redditCount} posts/24h`      : null} />
           <ScoreGauge label="Traffic"     value={result.scores.traffic}  detail={result.vegCount    != null ? `${result.vegCount} vegarbeid/5 km`  : null} />
           <ScoreGauge label="Air Quality" value={result.scores.air}      detail={result.aqiVal      != null ? `AQI ${result.aqiVal}${result.pm25Val != null ? ` · PM2.5 ${result.pm25Val.toFixed(1)}` : ''}` : null} />
           <ScoreGauge label="Terrain"     value={result.scores.elev}     detail={result.elevationM  != null ? `${result.elevationM} m asl`          : null} />
