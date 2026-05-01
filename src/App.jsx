@@ -1,24 +1,20 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { classify } from './classify.js'
 
-// ─── Kinetic Channel ────────────────────────────────────────────────────────
-// Detects infrasonic frequency (0–20 Hz) from DeviceMotionEvent Z-axis
-// using Cooley-Tukey FFT over a rolling 512-sample buffer (Hanning-windowed).
+// ─── FFT / Spectrum utilities ─────────────────────────────────────────────────
+// Shared by both Kinetic (accelerometer) and Acoustic (microphone) channels.
 
-const FFT_SIZE = 512
+const FFT_SIZE        = 512   // must equal ACOUSTIC_FFT_SIZE; shared HANN window
 const SPECTRUM_MAX_HZ = 20
 const SPECTRUM_UPDATE_MS = 500
 
-// Precomputed Hanning window for FFT_SIZE to avoid per-call allocation
 const HANN = (() => {
   const w = new Float32Array(FFT_SIZE)
-  for (let i = 0; i < FFT_SIZE; i++) {
+  for (let i = 0; i < FFT_SIZE; i++)
     w[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (FFT_SIZE - 1)))
-  }
   return w
 })()
 
-// In-place Cooley-Tukey radix-2 DIT FFT
 function fft(re, im) {
   const n = re.length
   for (let i = 1, j = 0; i < n; i++) {
@@ -32,8 +28,7 @@ function fft(re, im) {
   }
   for (let len = 2; len <= n; len <<= 1) {
     const ang = (-2 * Math.PI) / len
-    const wRe = Math.cos(ang)
-    const wIm = Math.sin(ang)
+    const wRe = Math.cos(ang), wIm = Math.sin(ang)
     for (let i = 0; i < n; i += len) {
       let curRe = 1, curIm = 0
       for (let j = 0; j < (len >> 1); j++) {
@@ -42,7 +37,7 @@ function fft(re, im) {
         const vRe = re[half] * curRe - im[half] * curIm
         const vIm = re[half] * curIm + im[half] * curRe
         re[i + j] = uRe + vRe; im[i + j] = uIm + vIm
-        re[half] = uRe - vRe; im[half] = uIm - vIm
+        re[half]  = uRe - vRe; im[half]  = uIm - vIm
         const nr = curRe * wRe - curIm * wIm
         curIm = curRe * wIm + curIm * wRe
         curRe = nr
@@ -53,7 +48,6 @@ function fft(re, im) {
 
 function computeSpectrum(samples, sampleRate) {
   const n = samples.length
-  // DC removal to prevent gravity offset from swamping the spectrum
   const mean = samples.reduce((a, b) => a + b, 0) / n
   const re = new Float32Array(n)
   const im = new Float32Array(n)
@@ -61,10 +55,9 @@ function computeSpectrum(samples, sampleRate) {
   fft(re, im)
 
   const freqRes = sampleRate / n
-  const maxBin = Math.min(Math.ceil(SPECTRUM_MAX_HZ / freqRes), (n >> 1) - 1)
+  const maxBin  = Math.min(Math.ceil(SPECTRUM_MAX_HZ / freqRes), (n >> 1) - 1)
 
-  let maxMag = 0
-  let dominantBin = 1
+  let maxMag = 0, dominantBin = 1
   const rawMags = []
   for (let k = 0; k <= maxBin; k++) {
     const mag = Math.sqrt(re[k] ** 2 + im[k] ** 2) / n
@@ -73,15 +66,15 @@ function computeSpectrum(samples, sampleRate) {
   }
 
   const bins = rawMags.map((mag, k) => ({
-    hz: k * freqRes,
+    hz:  k * freqRes,
     mag: maxMag > 0 ? Math.min(mag / maxMag, 1) : 0,
   }))
 
   const dominantHz = dominantBin * freqRes
   let zone = null
-  if (dominantHz >= 1 && dominantHz <= 5) zone = 'oasis'
+  if (dominantHz >= 1 && dominantHz <= 5)      zone = 'oasis'
   else if (dominantHz > 5 && dominantHz <= 12) zone = 'neutral'
-  else if (dominantHz > 12) zone = 'stress'
+  else if (dominantHz > 12)                    zone = 'stress'
 
   return { bins, dominantHz, zone }
 }
@@ -109,26 +102,53 @@ function rms(values) {
   return Math.sqrt(values.reduce((s, v) => s + v * v, 0) / values.length)
 }
 
+// ─── Kinetic Channel ──────────────────────────────────────────────────────────
+// Burst mode: listen until FFT_SIZE accelerometer samples are collected,
+// compute FFT, then rest 50 s before the next burst.
+
+const KINETIC_REST_MS = 50_000
+
 function useKineticSensor() {
-  const [status, setStatus] = useState('idle')
-  const [reading, setReading] = useState(null)
-  const bufferRef = useRef([])
-  const sampleRateRef = useRef(60)
+  const [status, setStatus]               = useState('idle')
+  const [reading, setReading]             = useState(null)
+  const [restSecondsLeft, setRestSeconds] = useState(0)
+
+  const bufferRef       = useRef([])
+  const sampleRateRef   = useRef(60)
   const lastSpectrumRef = useRef(0)
-  const handlerRef = useRef(null)
+  const handlerRef      = useRef(null)
+  const restTimerRef    = useRef(null)
+  const countdownRef    = useRef(null)
+
+  const enterRest = useCallback(() => {
+    if (handlerRef.current) window.removeEventListener('devicemotion', handlerRef.current)
+    bufferRef.current = []
+    setStatus('resting')
+    let left = Math.round(KINETIC_REST_MS / 1000)
+    setRestSeconds(left)
+    clearInterval(countdownRef.current)
+    countdownRef.current = setInterval(() => {
+      left = Math.max(0, left - 1)
+      setRestSeconds(left)
+    }, 1000)
+    restTimerRef.current = setTimeout(() => {
+      clearInterval(countdownRef.current)
+      if (handlerRef.current) {
+        window.addEventListener('devicemotion', handlerRef.current)
+        setStatus('active')
+      }
+    }, KINETIC_REST_MS)
+  }, [])
 
   const handleMotion = useCallback((e) => {
     const { acceleration: acc, accelerationIncludingGravity: accG, interval } = e
     if (!acc && !accG) return
     if (interval > 0) {
       const rate = 1000 / interval
-      // iOS Safari reports interval in seconds rather than milliseconds;
-      // guard: if bin width (rate/FFT_SIZE) > 1 Hz the unit is wrong → divide by 1000
+      // iOS Safari reports interval in seconds rather than ms; guard against it
       sampleRateRef.current = rate / FFT_SIZE > 1 ? rate / 1000 : rate
     }
 
-    // acceleration (without gravity) is null on many iOS devices; fall back to
-    // accelerationIncludingGravity — DC offset is removed in computeSpectrum
     const x = acc?.x ?? accG?.x ?? 0
     const y = acc?.y ?? accG?.y ?? 0
     const z = acc?.z ?? accG?.z ?? 0
@@ -141,15 +161,21 @@ function useKineticSensor() {
 
     if (bufferRef.current.length === FFT_SIZE && now - lastSpectrumRef.current >= SPECTRUM_UPDATE_MS) {
       lastSpectrumRef.current = now
-      const { bins, dominantHz, zone } = computeSpectrum(bufferRef.current, sampleRateRef.current)
-      setReading({ dominantHz, magnitudeRms: magnitudeRms.toFixed(3), spectrum: bins, zone })
+      const spec = computeSpectrum(bufferRef.current, sampleRateRef.current)
+      setReading({
+        dominantHz:   spec.dominantHz,
+        magnitudeRms: magnitudeRms.toFixed(3),
+        zone:         spec.zone,
+        energies:     zoneEnergies(spec.bins),
+      })
+      enterRest()
     } else {
       setReading(prev => prev
         ? { ...prev, magnitudeRms: magnitudeRms.toFixed(3) }
-        : { dominantHz: null, magnitudeRms: magnitudeRms.toFixed(3), spectrum: null, zone: null }
+        : { dominantHz: null, magnitudeRms: magnitudeRms.toFixed(3), zone: null, energies: null }
       )
     }
-  }, [])
+  }, [enterRest])
 
   const start = useCallback(async () => {
     if (typeof DeviceMotionEvent === 'undefined') { setStatus('error'); return }
@@ -167,74 +193,168 @@ function useKineticSensor() {
   }, [handleMotion])
 
   const stop = useCallback(() => {
-    if (handlerRef.current) {
-      window.removeEventListener('devicemotion', handlerRef.current)
-      handlerRef.current = null
-    }
-    bufferRef.current = []
+    clearTimeout(restTimerRef.current)
+    clearInterval(countdownRef.current)
+    if (handlerRef.current) window.removeEventListener('devicemotion', handlerRef.current)
+    handlerRef.current      = null
+    bufferRef.current       = []
     lastSpectrumRef.current = 0
     setStatus('idle')
     setReading(null)
+    setRestSeconds(0)
   }, [])
 
   useEffect(() => () => {
+    clearTimeout(restTimerRef.current)
+    clearInterval(countdownRef.current)
     if (handlerRef.current) window.removeEventListener('devicemotion', handlerRef.current)
   }, [])
 
-  return { status, reading, start, stop }
+  return { status, reading, restSecondsLeft, start, stop }
 }
 
-// ─── Magnetic Channel ────────────────────────────────────────────────────────
-// Computes rolling flux variance (stddev) over 5 seconds.
-// Uses Generic Sensor API (Magnetometer) on Android only — Apple restricts
-// raw magnetometer access on all iOS browsers.
+// ─── Acoustic Channel ─────────────────────────────────────────────────────────
+// Burst mode: capture 10 s of microphone audio at native rate, downsample to
+// 200 Hz to isolate infrasound, run FFT, rest 50 s, repeat.
+// ScriptProcessorNode is used for broadest iOS Safari compatibility.
 
-const MAGNETIC_WINDOW_MS = 5000
+const ACOUSTIC_DOWNSAMPLE_HZ = 200
+const ACOUSTIC_CAPTURE_MS    = 10_000
+const ACOUSTIC_REST_MS       = 50_000
+const ACOUSTIC_FFT_SIZE      = 512   // must equal FFT_SIZE to share HANN
 
-function rollingVariance(samplesRef) {
-  const now = Date.now()
-  samplesRef.current = samplesRef.current.filter(s => now - s.t < MAGNETIC_WINDOW_MS)
-  const vals = samplesRef.current.map(s => s.v)
-  if (vals.length < 2) return 0
-  const mean = vals.reduce((a, b) => a + b, 0) / vals.length
-  return Math.sqrt(vals.reduce((s, v) => s + (v - mean) ** 2, 0) / vals.length)
-}
+function useAcousticSensor() {
+  const [status, setStatus]               = useState('idle')
+  const [reading, setReading]             = useState(null)
+  const [restSecondsLeft, setRestSeconds] = useState(0)
 
-function useMagneticSensor() {
-  const [status, setStatus] = useState('idle')
-  const [reading, setReading] = useState(null)
-  const samplesRef = useRef([])
-  const sensorRef = useRef(null)
+  const activeRef    = useRef(false)
+  const streamRef    = useRef(null)
+  const ctxRef       = useRef(null)
+  const processorRef = useRef(null)
+  const bufferRef    = useRef([])
+  const timerRef     = useRef(null)
+  const countdownRef = useRef(null)
 
-  const pushSample = useCallback((v) => {
-    samplesRef.current.push({ v, t: Date.now() })
-    return rollingVariance(samplesRef)
+  const closeAudio = useCallback(() => {
+    try { processorRef.current?.disconnect() } catch { /* */ }
+    processorRef.current = null
+    streamRef.current?.getTracks().forEach(t => t.stop())
+    streamRef.current = null
+    try { ctxRef.current?.close() } catch { /* */ }
+    ctxRef.current = null
   }, [])
 
-  useEffect(() => {
-    if (typeof Magnetometer === 'undefined') { setStatus('unsupported'); return }
-    try {
-      const sensor = new Magnetometer({ frequency: 10 })
-      sensor.addEventListener('reading', () => {
-        const mag = Math.sqrt(sensor.x ** 2 + sensor.y ** 2 + sensor.z ** 2)
-        const variance = pushSample(mag)
-        setReading({ fluxVariance: variance.toFixed(3) })
+  // runCycle via ref so recursive scheduling always sees the latest closeAudio
+  const runCycleRef = useRef(null)
+  runCycleRef.current = () => {
+    if (!activeRef.current) return
+
+    // ── Capture phase ────────────────────────────────────────────────────────
+    setStatus('listening')
+    bufferRef.current = []
+
+    navigator.mediaDevices
+      .getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } })
+      .then(stream => {
+        if (!activeRef.current) { stream.getTracks().forEach(t => t.stop()); return }
+        streamRef.current = stream
+
+        const ACtx = window.AudioContext || window.webkitAudioContext
+        const ctx  = new ACtx()
+        ctxRef.current = ctx
+        const resume = ctx.state === 'suspended' ? ctx.resume() : Promise.resolve()
+
+        resume.then(() => {
+          if (!activeRef.current) { closeAudio(); return }
+
+          const source = ctx.createMediaStreamSource(stream)
+          const proc   = ctx.createScriptProcessor(4096, 1, 1)
+          processorRef.current = proc
+          const ratio  = Math.round(ctx.sampleRate / ACOUSTIC_DOWNSAMPLE_HZ)
+
+          proc.onaudioprocess = (e) => {
+            if (!activeRef.current) return
+            const data = e.inputBuffer.getChannelData(0)
+            // Zero output to prevent mic-to-speaker feedback
+            e.outputBuffer.getChannelData(0).fill(0)
+            for (let i = 0; i < data.length; i += ratio) {
+              let s = 0, c = 0
+              for (let j = i; j < Math.min(i + ratio, data.length); j++) { s += data[j]; c++ }
+              bufferRef.current.push(s / c)
+            }
+          }
+
+          // connecting to destination is required for onaudioprocess to fire on iOS
+          source.connect(proc)
+          proc.connect(ctx.destination)
+
+          timerRef.current = setTimeout(() => {
+            if (!activeRef.current) return
+            const raw = bufferRef.current.slice(-ACOUSTIC_FFT_SIZE)
+            closeAudio()
+
+            if (raw.length >= ACOUSTIC_FFT_SIZE / 2) {
+              // Zero-pad if fewer than FFT_SIZE samples were collected
+              const samples = raw.length < ACOUSTIC_FFT_SIZE
+                ? Float32Array.from({ length: ACOUSTIC_FFT_SIZE }, (_, i) => raw[i] ?? 0)
+                : raw
+              const spec = computeSpectrum(samples, ACOUSTIC_DOWNSAMPLE_HZ)
+              setReading({ dominantHz: spec.dominantHz, zone: spec.zone, energies: zoneEnergies(spec.bins) })
+            }
+
+            // ── Rest phase ───────────────────────────────────────────────────
+            setStatus('resting')
+            let left = Math.round(ACOUSTIC_REST_MS / 1000)
+            setRestSeconds(left)
+            clearInterval(countdownRef.current)
+            countdownRef.current = setInterval(() => {
+              left = Math.max(0, left - 1)
+              setRestSeconds(left)
+            }, 1000)
+
+            timerRef.current = setTimeout(() => {
+              clearInterval(countdownRef.current)
+              runCycleRef.current?.()
+            }, ACOUSTIC_REST_MS)
+          }, ACOUSTIC_CAPTURE_MS)
+        })
       })
-      sensor.addEventListener('error', () => setStatus('unsupported'))
-      sensor.start()
-      sensorRef.current = sensor
-      setStatus('active')
-    } catch { setStatus('unsupported') }
+      .catch(err => {
+        if (!activeRef.current) return
+        const denied = err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError'
+        setStatus(denied ? 'denied' : 'error')
+        activeRef.current = false
+      })
+  }
 
-    return () => { if (sensorRef.current) sensorRef.current.stop() }
-  }, [pushSample])
+  const start = useCallback(() => {
+    activeRef.current = true
+    runCycleRef.current?.()
+  }, [])
 
-  return { status, reading }
+  const stop = useCallback(() => {
+    activeRef.current = false
+    clearTimeout(timerRef.current)
+    clearInterval(countdownRef.current)
+    closeAudio()
+    bufferRef.current = []
+    setStatus('idle')
+    setReading(null)
+    setRestSeconds(0)
+  }, [closeAudio])
+
+  useEffect(() => () => {
+    activeRef.current = false
+    clearTimeout(timerRef.current)
+    clearInterval(countdownRef.current)
+    closeAudio()
+  }, [closeAudio])
+
+  return { status, reading, restSecondsLeft, start, stop }
 }
 
-// ─── Atmospheric Channel ─────────────────────────────────────────────────────
-// Fetches current barometric pressure from Open-Meteo (free, no key)
-// using the device's GPS coordinates. Computes delta between consecutive samples.
+// ─── Atmospheric Channel ──────────────────────────────────────────────────────
 
 function useAtmosphericSensor() {
   const [status, setStatus] = useState('idle')
@@ -250,7 +370,7 @@ function useAtmosphericSensor() {
           const url =
             `https://api.open-meteo.com/v1/forecast` +
             `?latitude=${lat}&longitude=${lon}&current=surface_pressure&forecast_days=1`
-          const res = await fetch(url)
+          const res  = await fetch(url)
           const data = await res.json()
           const pressure = data?.current?.surface_pressure
           if (pressure == null) throw new Error()
@@ -272,8 +392,6 @@ function useAtmosphericSensor() {
 }
 
 // ─── Location Score ───────────────────────────────────────────────────────────
-// Combines GDELT social calm, elevation/remoteness, and live sensor readings
-// into a composite Aether Score (0–100) for the current GPS location.
 
 function socialCalmScore(negCount) {
   return Math.max(15, Math.round(95 - Math.log10(negCount + 1) * 32))
@@ -292,17 +410,16 @@ function kineticCalmScore(dominantHz) {
   return 25
 }
 
-function magneticCalmScore(fluxVariance) {
-  if (fluxVariance == null) return null
-  const v = parseFloat(fluxVariance)
-  if (v < 0.5) return 88
-  if (v < 2.0) return 60
-  return 28
+function acousticCalmScore(dominantHz) {
+  if (dominantHz == null) return null
+  if (dominantHz < 0.1) return 90
+  if (dominantHz <= 5)  return 80
+  if (dominantHz <= 12) return 55
+  return 25
 }
 
 function emDensityScore(count) {
   if (count == null) return null
-  // 0 towers → 95, 2 → 83, 10 → 68, 30 → 53, 100+ → 15
   return Math.max(15, Math.round(95 - Math.log10(count + 1) * 40))
 }
 
@@ -315,10 +432,9 @@ function useLocationScore() {
   const [status, setStatus] = useState('idle')
   const [result, setResult] = useState(null)
 
-  const compute = useCallback(async (lat, lon, elevationM, kineticReading, magneticReading) => {
+  const compute = useCallback(async (lat, lon, elevationM, kineticReading, acousticReading) => {
     setStatus('computing')
 
-    // Reverse geocode — soft failure, falls back to 'Unknown'
     let city = 'Unknown'
     try {
       const geoRes = await fetch(
@@ -334,24 +450,19 @@ function useLocationScore() {
         'Unknown'
     } catch { /* proceed */ }
 
-    // Wikipedia — conflict article count for city (CORS-ok via origin=*)
-    // GDELT blocked all non-browser origins (403); Wikipedia MediaWiki API is public.
-    let negCount = null
-    let socialScoreVal = null
+    let negCount = null, socialScoreVal = null
     try {
-      const wq = encodeURIComponent(`(protest OR riot OR unrest OR conflict) "${city}"`)
+      const wq      = encodeURIComponent(`(protest OR riot OR unrest OR conflict) "${city}"`)
       const wikiRes = await fetch(
         `https://en.wikipedia.org/w/api.php?action=query&list=search` +
         `&srsearch=${wq}&srnamespace=0&srlimit=1&format=json&origin=*`
       )
-      const wiki = await wikiRes.json()
-      negCount = wiki?.query?.searchinfo?.totalhits ?? 0
+      const wiki     = await wikiRes.json()
+      negCount       = wiki?.query?.searchinfo?.totalhits ?? 0
       socialScoreVal = socialCalmScore(negCount)
     } catch { /* Wikipedia unavailable */ }
 
-    // OSM Overpass — communication towers within 5 km radius
-    let emCount = null
-    let emScoreVal = null
+    let emCount = null, emScoreVal = null
     try {
       const oq =
         `[out:json][timeout:15];` +
@@ -363,22 +474,19 @@ function useLocationScore() {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: `data=${encodeURIComponent(oq)}`,
       })
-      const osm = await osmRes.json()
-      emCount = parseInt(osm?.elements?.[0]?.tags?.total ?? '0', 10)
+      const osm  = await osmRes.json()
+      emCount    = parseInt(osm?.elements?.[0]?.tags?.total ?? '0', 10)
       emScoreVal = emDensityScore(emCount)
     } catch { /* Overpass unavailable */ }
 
     const elev     = elevationScore(elevationM)
     const kinetic  = kineticCalmScore(kineticReading?.dominantHz ?? null)
-    const magnetic = magneticCalmScore(magneticReading?.fluxVariance ?? null)
+    const acoustic = acousticCalmScore(acousticReading?.dominantHz ?? null)
 
     setResult({
-      city,
-      negCount,
-      elevationM,
-      emCount,
-      scores: { social: socialScoreVal, elev, em: emScoreVal, kinetic, magnetic },
-      aether: compositeAether([socialScoreVal, elev, emScoreVal, kinetic, magnetic]),
+      city, negCount, elevationM, emCount,
+      scores: { social: socialScoreVal, elev, em: emScoreVal, kinetic, acoustic },
+      aether: compositeAether([socialScoreVal, elev, emScoreVal, kinetic, acoustic]),
     })
     setStatus('ready')
   }, [])
@@ -386,26 +494,36 @@ function useLocationScore() {
   return { status, result, compute }
 }
 
-// ─── App ─────────────────────────────────────────────────────────────────────
+// ─── UI Components ────────────────────────────────────────────────────────────
 
 function TierBadge({ tier }) {
   if (!tier) return null
-  return <span className={`tier-badge tier-${tier.id ?? tier.level}`}>{tier.label}{tier.note ? ` · ${tier.note}` : ''}</span>
+  return (
+    <span className={`tier-badge tier-${tier.id ?? tier.level}`}>
+      {tier.label}{tier.note ? ` · ${tier.note}` : ''}
+    </span>
+  )
 }
 
-function ZoneBadge({ zone }) {
-  if (!zone) return null
-  const map = {
-    oasis:   { label: 'OASIS',       cls: 'zone-oasis'   },
-    neutral: { label: 'NEUTRAL',     cls: 'zone-neutral'  },
-    stress:  { label: 'STRESS NODE', cls: 'zone-stress'   },
-  }
-  const { label, cls } = map[zone]
-  return <span className={`zone-badge ${cls}`}>{label}</span>
+const ZONE_INFO = {
+  oasis:   {
+    label: 'Oasis',
+    color: '#34d399', border: '#0d9488', bg: '#022c22',
+    desc:  'Natural ground resonance — forests, open fields, deep earth. Restorative frequency range.',
+  },
+  neutral: {
+    label: 'Neutral',
+    color: '#9ca3af', border: '#374151', bg: '#111827',
+    desc:  'Mixed field — natural and mechanical signals present. Ambiguous environment.',
+  },
+  stress: {
+    label: 'Stress Node',
+    color: '#f87171', border: '#dc2626', bg: '#1f0a0a',
+    desc:  'Mechanical interference — HVAC, traffic, or industrial vibration detected.',
+  },
 }
 
-function ZoneEnergyBars({ bins }) {
-  const energies = zoneEnergies(bins)
+function ZoneEnergyBars({ energies }) {
   if (!energies) return null
   const rows = [
     { key: 'oasis',   label: 'Oasis',      range: '1–5 Hz',   color: '#34d399', pct: energies.oasis   },
@@ -428,28 +546,25 @@ function ZoneEnergyBars({ bins }) {
   )
 }
 
-const ZONE_INFO = {
-  oasis:   {
-    label: 'Oasis',
-    color: '#34d399', border: '#0d9488', bg: '#022c22',
-    desc:  'Natural ground resonance — forests, open fields, deep earth. Restorative frequency range.',
-  },
-  neutral: {
-    label: 'Neutral',
-    color: '#9ca3af', border: '#374151', bg: '#111827',
-    desc:  'Mixed field — natural and mechanical signals present. Ambiguous environment.',
-  },
-  stress:  {
-    label: 'Stress Node',
-    color: '#f87171', border: '#dc2626', bg: '#1f0a0a',
-    desc:  'Mechanical interference — HVAC, traffic, or industrial vibration detected.',
-  },
+function ZoneVerdict({ zone, dominantHz }) {
+  if (!zone) return null
+  const zInfo = ZONE_INFO[zone]
+  return (
+    <div className="zone-verdict" style={{ background: zInfo.bg, borderColor: zInfo.border }}>
+      <div className="zone-verdict-top">
+        <span className="zone-verdict-name" style={{ color: zInfo.color }}>{zInfo.label}</span>
+        {dominantHz != null && (
+          <span className="zone-verdict-hz">{dominantHz.toFixed(2)} Hz</span>
+        )}
+      </div>
+      <p className="zone-verdict-desc">{zInfo.desc}</p>
+    </div>
+  )
 }
 
-function KineticCard({ sensor, tier }) {
-  const { status, reading, start, stop } = sensor
-  const zone = reading?.zone ?? null
-  const zInfo = zone ? ZONE_INFO[zone] : null
+function KineticCard({ sensor }) {
+  const { status, reading, restSecondsLeft, start, stop } = sensor
+  const isActive = status === 'active' || status === 'resting'
 
   return (
     <div className="card card-kinetic">
@@ -458,32 +573,20 @@ function KineticCard({ sensor, tier }) {
         <span className="card-sensation">Low-frequency vibration</span>
       </div>
 
-      {status !== 'active' && (
-        <p className="protocol-hint">Place phone flat on concrete or stone · silence · allow 60 s</p>
-      )}
+      {!isActive && <p className="protocol-hint">Place phone flat on concrete or stone · silence · allow 60 s</p>}
+      {status === 'active'  && !reading?.energies && <p className="metric-idle" style={{ margin: '0.6rem 0' }}>Listening…</p>}
+      {status === 'resting' && <p className="card-sub mode">Next burst in {restSecondsLeft} s</p>}
 
-      {status === 'active' && !reading?.dominantHz && (
-        <p className="metric-idle" style={{ margin: '0.6rem 0' }}>Listening…</p>
-      )}
-
-      {reading?.spectrum && <ZoneEnergyBars bins={reading.spectrum} />}
-
-      {zInfo && (
-        <div className="zone-verdict" style={{ background: zInfo.bg, borderColor: zInfo.border }}>
-          <div className="zone-verdict-top">
-            <span className="zone-verdict-name" style={{ color: zInfo.color }}>{zInfo.label}</span>
-            <span className="zone-verdict-hz">{reading.dominantHz.toFixed(2)} Hz</span>
-          </div>
-          <p className="zone-verdict-desc">{zInfo.desc}</p>
-        </div>
-      )}
+      {reading?.energies && <ZoneEnergyBars energies={reading.energies} />}
+      <ZoneVerdict zone={reading?.zone} dominantHz={reading?.dominantHz} />
 
       <button
-        className={`card-btn ${status === 'active' ? 'btn-stop' : 'btn-start'}`}
-        onClick={status === 'active' ? stop : start}
+        className={`card-btn ${isActive ? 'btn-stop' : 'btn-start'}`}
+        onClick={isActive ? stop : start}
         disabled={status === 'pending' || status === 'error'}
       >
-        {status === 'active' ? 'Stop'
+        {status === 'active'  ? 'Stop'
+          : status === 'resting' ? 'Stop'
           : status === 'pending' ? 'Requesting…'
           : status === 'error'   ? 'Unavailable'
           : 'Start Scan'}
@@ -495,24 +598,35 @@ function KineticCard({ sensor, tier }) {
   )
 }
 
-function MagneticCard({ sensor, tier }) {
-  const { status, reading } = sensor
+function AcousticCard({ sensor }) {
+  const { status, reading, restSecondsLeft, start, stop } = sensor
+  const isActive = status === 'listening' || status === 'resting'
+
   return (
-    <div className="card card-magnetic">
+    <div className="card card-acoustic">
       <div className="card-header">
-        <span className="card-title">Magnetic</span>
-        <TierBadge tier={tier} />
+        <span className="card-title">Acoustic</span>
+        <span className="card-sensation">Airborne infrasound</span>
       </div>
-      <div className="card-metric">
-        {reading
-          ? <><span className="metric-value">{reading.fluxVariance}</span><span className="metric-unit"> ΔμT</span></>
-          : <span className="metric-idle">{status === 'active' ? 'Warming up…' : '—'}</span>
-        }
-      </div>
-      {reading && <div className="card-sub">Clarity / Peace</div>}
-      {status === 'unsupported' && (
-        <p className="card-hint">Requires Android Chrome — Apple restricts raw magnetometer access on all iOS browsers</p>
+
+      {!isActive && status !== 'denied' && status !== 'error' && (
+        <p className="protocol-hint">Place phone flat · microphone unobstructed · silence</p>
       )}
+      {status === 'listening' && <p className="card-sub mode">Capturing audio…</p>}
+      {status === 'resting'   && <p className="card-sub mode">Next capture in {restSecondsLeft} s</p>}
+
+      {reading?.energies && <ZoneEnergyBars energies={reading.energies} />}
+      <ZoneVerdict zone={reading?.zone} dominantHz={reading?.dominantHz} />
+
+      <button
+        className={`card-btn ${isActive ? 'btn-stop' : 'btn-start'}`}
+        onClick={isActive ? stop : start}
+      >
+        {isActive ? 'Stop' : 'Start Scan'}
+      </button>
+
+      {status === 'denied' && <p className="card-hint">Allow microphone access in browser settings</p>}
+      {status === 'error'  && <p className="card-hint">Microphone unavailable on this device</p>}
     </div>
   )
 }
@@ -536,7 +650,7 @@ function AtmosphericCard({ sensor, tier }) {
           : <span className="metric-idle">{status === 'sampling' ? 'Locating…' : '—'}</span>
         }
       </div>
-      {reading?.deltaP && <div className="card-sub">ΔP {reading.deltaP} hPa · Freshness / Vitality</div>}
+      {reading?.deltaP  && <div className="card-sub">ΔP {reading.deltaP} hPa · Freshness / Vitality</div>}
       {reading && !reading.deltaP && <div className="card-sub">Freshness / Vitality</div>}
       {reading && <div className="card-sub">{reading.lat}, {reading.lon}</div>}
       <button
@@ -546,9 +660,7 @@ function AtmosphericCard({ sensor, tier }) {
       >
         {status === 'sampling' ? 'Fetching…' : 'Sample Atmosphere'}
       </button>
-      {status === 'error' && (
-        <p className="card-hint">Location or network unavailable</p>
-      )}
+      {status === 'error' && <p className="card-hint">Location or network unavailable</p>}
     </div>
   )
 }
@@ -570,14 +682,14 @@ function ScoreGauge({ label, value, detail }) {
   )
 }
 
-function LocationScoreCard({ atmospheric, kinetic, magnetic }) {
+function LocationScoreCard({ atmospheric, kinetic, acoustic }) {
   const { status, result, compute } = useLocationScore()
   const reading = atmospheric.reading
 
   const handleCompute = useCallback(() => {
     if (!reading) return
-    compute(reading.lat, reading.lon, reading.elevationM, kinetic.reading, magnetic.reading)
-  }, [reading, kinetic.reading, magnetic.reading, compute])
+    compute(reading.lat, reading.lon, reading.elevationM, kinetic.reading, acoustic.reading)
+  }, [reading, kinetic.reading, acoustic.reading, compute])
 
   return (
     <div className="card card-score">
@@ -595,11 +707,11 @@ function LocationScoreCard({ atmospheric, kinetic, magnetic }) {
 
       {result && (
         <div className="score-breakdown">
-          <ScoreGauge label="Social"     value={result.scores.social}   detail={result.negCount != null ? `${result.negCount} wiki hits` : null} />
-          <ScoreGauge label="Terrain"    value={result.scores.elev}     detail={result.elevationM != null ? `${result.elevationM} m asl` : null} />
-          <ScoreGauge label="EM Density" value={result.scores.em}       detail={result.emCount != null ? `${result.emCount} towers/5 km` : null} />
-          <ScoreGauge label="Infrasound" value={result.scores.kinetic}  detail={kinetic.reading?.dominantHz != null ? `${kinetic.reading.dominantHz.toFixed(1)} Hz` : null} />
-          <ScoreGauge label="Magnetic"   value={result.scores.magnetic} detail={magnetic.reading ? `Δ${magnetic.reading.fluxVariance} μT` : null} />
+          <ScoreGauge label="Social"     value={result.scores.social}   detail={result.negCount   != null ? `${result.negCount} wiki hits`                          : null} />
+          <ScoreGauge label="Terrain"    value={result.scores.elev}     detail={result.elevationM != null ? `${result.elevationM} m asl`                            : null} />
+          <ScoreGauge label="EM Density" value={result.scores.em}       detail={result.emCount    != null ? `${result.emCount} towers/5 km`                         : null} />
+          <ScoreGauge label="Ground"     value={result.scores.kinetic}  detail={kinetic.reading?.dominantHz  != null ? `${kinetic.reading.dominantHz.toFixed(1)} Hz`  : null} />
+          <ScoreGauge label="Acoustic"   value={result.scores.acoustic} detail={acoustic.reading?.dominantHz != null ? `${acoustic.reading.dominantHz.toFixed(1)} Hz` : null} />
         </div>
       )}
 
@@ -617,41 +729,43 @@ function LocationScoreCard({ atmospheric, kinetic, magnetic }) {
   )
 }
 
+// ─── App ──────────────────────────────────────────────────────────────────────
+
 export default function App() {
-  const kinetic = useKineticSensor()
-  const magnetic = useMagneticSensor()
+  const kinetic     = useKineticSensor()
+  const acoustic    = useAcousticSensor()
   const atmospheric = useAtmosphericSensor()
   const [log, setLog] = useState([])
 
-  const { k, m, a, archetype } = useMemo(
-    () => classify(kinetic.reading, magnetic.reading, atmospheric.reading),
-    [kinetic.reading, magnetic.reading, atmospheric.reading]
+  const { k, a, archetype } = useMemo(
+    () => classify(kinetic.reading, null, atmospheric.reading),
+    [kinetic.reading, atmospheric.reading]
   )
 
   const capture = useCallback(() => {
-    const { archetype: arc } = classify(kinetic.reading, magnetic.reading, atmospheric.reading)
+    const { archetype: arc } = classify(kinetic.reading, null, atmospheric.reading)
     setLog(prev => [{
-      id: Date.now(),
-      ts: new Date().toLocaleTimeString('en-US', { hour12: false }),
-      archetype: arc?.name ?? null,
-      kinetic: kinetic.reading ? { ...kinetic.reading } : null,
-      magnetic: magnetic.reading ? { ...magnetic.reading } : null,
+      id:          Date.now(),
+      ts:          new Date().toLocaleTimeString('en-US', { hour12: false }),
+      archetype:   arc?.name ?? null,
+      kinetic:     kinetic.reading     ? { ...kinetic.reading }     : null,
+      acoustic:    acoustic.reading    ? { ...acoustic.reading }    : null,
       atmospheric: atmospheric.reading ? { ...atmospheric.reading } : null,
     }, ...prev].slice(0, 100))
-  }, [kinetic.reading, magnetic.reading, atmospheric.reading])
+  }, [kinetic.reading, acoustic.reading, atmospheric.reading])
 
   return (
     <div className="app">
       <header>
         <h1>The Lithos Protocol</h1>
-        <p className="subtitle">Infrasonic · Magnetic · Atmospheric field mapping</p>
+        <p className="subtitle">Infrasonic · Acoustic · Atmospheric field mapping</p>
       </header>
 
       <div className="channels">
-        <KineticCard sensor={kinetic} tier={k} />
-        <MagneticCard sensor={magnetic} tier={m} />
+        <KineticCard  sensor={kinetic} />
+        <AcousticCard sensor={acoustic} />
         <AtmosphericCard sensor={atmospheric} tier={a} />
-        <LocationScoreCard atmospheric={atmospheric} kinetic={kinetic} magnetic={magnetic} />
+        <LocationScoreCard atmospheric={atmospheric} kinetic={kinetic} acoustic={acoustic} />
       </div>
 
       {archetype && (
@@ -665,9 +779,7 @@ export default function App() {
       )}
 
       <div className="actions">
-        <button className="capture-btn" onClick={capture}>
-          Capture Reading
-        </button>
+        <button className="capture-btn" onClick={capture}>Capture Reading</button>
         {log.length > 0 && (
           <button className="clear-btn" onClick={() => setLog([])}>
             Clear ({log.length})
@@ -684,12 +796,13 @@ export default function App() {
                 <span className="log-ts">{e.ts}</span>
                 <span className="log-archetype">{e.archetype ?? '—'}</span>
                 <span className="log-k">
-                  {e.kinetic?.dominantHz != null
-                    ? `${e.kinetic.dominantHz.toFixed(2)} Hz`
-                    : '—'}
+                  {e.kinetic?.dominantHz != null ? `${e.kinetic.dominantHz.toFixed(2)} Hz` : '—'}
                   {e.kinetic?.zone ? ` · ${e.kinetic.zone}` : ''}
                 </span>
-                <span className="log-m">{e.magnetic ? `Δ${e.magnetic.fluxVariance} μT` : '—'}</span>
+                <span className="log-ac">
+                  {e.acoustic?.dominantHz != null ? `${e.acoustic.dominantHz.toFixed(2)} Hz` : '—'}
+                  {e.acoustic?.zone ? ` · ${e.acoustic.zone}` : ''}
+                </span>
                 <span className="log-a">{e.atmospheric ? `${e.atmospheric.pressureHpa} hPa` : '—'}</span>
               </li>
             ))}
