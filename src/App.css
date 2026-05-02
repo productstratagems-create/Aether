@@ -765,3 +765,93 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   font-family: 'Courier New', monospace;
   color: #818cf8;
 }
+
+/* Score status dot (inline in ScoreGauge) */
+.score-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-right: 0.1rem;
+  align-self: center;
+}
+
+/* Sources toggle button */
+.sources-toggle {
+  margin-top: 0.5rem;
+  background: none;
+  border: 1px solid #1f2937;
+  color: #4b5563;
+  font-size: 0.62rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 600;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sources-toggle:hover { border-color: #374151; color: #6b7280; }
+
+/* Sources panel */
+.sources-panel {
+  margin-top: 0.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  border: 1px solid #1f2937;
+  border-radius: 6px;
+  padding: 0.45rem 0.6rem;
+  background: #070710;
+}
+
+.source-row {
+  display: grid;
+  grid-template-columns: 8px 5.5rem 1fr auto 3.5rem;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.source-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.source-label {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+
+.source-domain {
+  font-size: 0.57rem;
+  font-family: 'Courier New', monospace;
+  color: #374151;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.source-raw {
+  font-size: 0.6rem;
+  font-family: 'Courier New', monospace;
+  color: #6b7280;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.source-raw-err { color: #f87171; }
+
+.source-latency {
+  font-size: 0.57rem;
+  font-family: 'Courier New', monospace;
+  color: #374151;
+  text-align: right;
+  white-space: nowrap;
+}
