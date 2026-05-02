@@ -250,7 +250,7 @@ function useAcousticSensor() {
   runCycleRef.current = () => {
     if (!activeRef.current) return
 
-    // ── Capture phase ────────────────────────────────────────────────────────
+    // ── Capture phase ───────────────────────────────────────────────────
     setStatus('listening')
     bufferRef.current = []
 
@@ -528,44 +528,26 @@ function useLocationScore() {
         'Unknown'
     } catch { /* proceed */ }
 
-    // Politiloggen — try REST (geo-filtered), fall back to RSS, soft-fail either way
+    // Politiloggen RSS — public feed, no auth, counts all incidents in last 24 h
     let policeCount = null, policeScoreVal = null
     {
       const t0 = Date.now()
       try {
-        let fetched = false
-        try {
-          const polRes = await fetch(
-            `https://api.politiet.no/politiloggen/v1/hendelser?lat=${lat}&lon=${lon}&radius=5000`,
-            { headers: { Accept: 'application/json' } }
-          )
-          if (polRes.ok) {
-            const polData = await polRes.json()
-            const cutoff  = Date.now() - 24 * 3600 * 1000
-            const items   = Array.isArray(polData) ? polData : (polData?.items ?? polData?.hendelser ?? [])
-            policeCount   = items.filter(h => new Date(h.created ?? h.tid ?? h.timestamp).getTime() > cutoff).length
-            fetched = true
-          }
-        } catch { /* CORS or network — try RSS */ }
-        if (!fetched) {
-          const rssRes = await fetch('https://api.politiet.no/politiloggen/v1/rss')
-          const xml    = new DOMParser().parseFromString(await rssRes.text(), 'text/xml')
-          const cutoff = Date.now() - 24 * 3600 * 1000
-          policeCount  = Array.from(xml.querySelectorAll('item'))
-            .filter(item => {
-              const pub  = item.querySelector('pubDate')?.textContent
-              const text = (item.querySelector('title')?.textContent ?? '') +
-                           (item.querySelector('description')?.textContent ?? '')
-              return pub && new Date(pub).getTime() > cutoff &&
-                     text.toLowerCase().includes(city.toLowerCase())
-            }).length
-        }
+        const rssRes = await fetch('https://api.politiet.no/politiloggen/v1/rss')
+        if (!rssRes.ok) throw new Error(`HTTP ${rssRes.status}`)
+        const xml    = new DOMParser().parseFromString(await rssRes.text(), 'text/xml')
+        const cutoff = Date.now() - 24 * 3600 * 1000
+        policeCount  = Array.from(xml.querySelectorAll('item'))
+          .filter(item => {
+            const pub = item.querySelector('pubDate')?.textContent
+            return pub && new Date(pub).getTime() > cutoff
+          }).length
         policeScoreVal = policeScore(policeCount)
         sources.police = { status: 'ok', latencyMs: Date.now() - t0, raw: `${policeCount} hendelser/24h` }
       } catch { sources.police = { status: 'error', latencyMs: Date.now() - t0, raw: null } }
     }
 
-    // Bluesky — public AT Protocol search, no auth required
+    // Bluesky — public AT Protocol search, no auth, no lang filter (Norwegian posts tagged nb/nn not no)
     let bskyCount = null, bskyScoreVal = null
     {
       const t0 = Date.now()
@@ -576,28 +558,29 @@ function useLocationScore() {
         )
         const bskyRes = await fetch(
           `https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts` +
-          `?q=${bskyQ}&limit=25&since=${since}&lang=no`
+          `?q=${bskyQ}&limit=25&since=${since}`
         )
+        if (!bskyRes.ok) throw new Error(`HTTP ${bskyRes.status}`)
         const bsky = await bskyRes.json()
-        bskyCount  = bsky?.posts?.length ?? 0
+        if (!Array.isArray(bsky?.posts)) throw new Error('unexpected response shape')
+        bskyCount  = bsky.posts.length
         bskyScoreVal = blueskyScore(bskyCount)
         sources.bluesky = { status: 'ok', latencyMs: Date.now() - t0, raw: `${bskyCount} posts/24h` }
       } catch { sources.bluesky = { status: 'error', latencyMs: Date.now() - t0, raw: null } }
     }
 
-    // Reddit — r/norge + r/oslo public search, no auth required
+    // Reddit — r/norge + r/oslo new posts listing (/new.json has CORS, /search.json does not)
     let redditCount = null, redditScoreVal = null
     {
       const t0 = Date.now()
       try {
-        const rdQ   = encodeURIComponent(city)
         const rdRes = await fetch(
-          `https://www.reddit.com/r/norge+oslo/search.json` +
-          `?q=${rdQ}&sort=new&restrict_sr=on&t=day&limit=25&raw_json=1`,
-          { headers: { Accept: 'application/json' } }
+          `https://www.reddit.com/r/norge+oslo/new.json?limit=25&raw_json=1`
         )
+        if (!rdRes.ok) throw new Error(`HTTP ${rdRes.status}`)
         const rd = await rdRes.json()
-        redditCount    = rd?.data?.children?.length ?? 0
+        if (!Array.isArray(rd?.data?.children)) throw new Error('unexpected response shape')
+        redditCount    = rd.data.children.length
         redditScoreVal = redditScore(redditCount)
         sources.reddit = { status: 'ok', latencyMs: Date.now() - t0, raw: `${redditCount} posts/day` }
       } catch { sources.reddit = { status: 'error', latencyMs: Date.now() - t0, raw: null } }
@@ -893,7 +876,7 @@ function ScoreGauge({ label, value, detail, status }) {
 }
 
 const SOURCE_META = {
-  police:  { label: 'Police Log',   domain: 'api.politiet.no' },
+  police:  { label: 'Police Log',   domain: 'api.politiet.no (RSS)' },
   bluesky: { label: 'Bluesky',      domain: 'public.api.bsky.app' },
   reddit:  { label: 'Reddit',       domain: 'reddit.com' },
   traffic: { label: 'Traffic',      domain: 'nvdbapiles-v3.atlas.vegvesen.no' },
