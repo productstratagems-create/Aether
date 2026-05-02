@@ -511,6 +511,7 @@ function useLocationScore() {
 
   const compute = useCallback(async (lat, lon, elevationM, kineticReading, acousticReading) => {
     setStatus('computing')
+    const sources = {}
 
     let city = 'Unknown'
     try {
@@ -529,129 +530,167 @@ function useLocationScore() {
 
     // Politiloggen — try REST (geo-filtered), fall back to RSS, soft-fail either way
     let policeCount = null, policeScoreVal = null
-    try {
-      let fetched = false
+    {
+      const t0 = Date.now()
       try {
-        const polRes = await fetch(
-          `https://api.politiet.no/politiloggen/v1/hendelser?lat=${lat}&lon=${lon}&radius=5000`,
-          { headers: { Accept: 'application/json' } }
-        )
-        if (polRes.ok) {
-          const polData = await polRes.json()
-          const cutoff  = Date.now() - 24 * 3600 * 1000
-          const items   = Array.isArray(polData) ? polData : (polData?.items ?? polData?.hendelser ?? [])
-          policeCount   = items.filter(h => new Date(h.created ?? h.tid ?? h.timestamp).getTime() > cutoff).length
-          fetched = true
+        let fetched = false
+        try {
+          const polRes = await fetch(
+            `https://api.politiet.no/politiloggen/v1/hendelser?lat=${lat}&lon=${lon}&radius=5000`,
+            { headers: { Accept: 'application/json' } }
+          )
+          if (polRes.ok) {
+            const polData = await polRes.json()
+            const cutoff  = Date.now() - 24 * 3600 * 1000
+            const items   = Array.isArray(polData) ? polData : (polData?.items ?? polData?.hendelser ?? [])
+            policeCount   = items.filter(h => new Date(h.created ?? h.tid ?? h.timestamp).getTime() > cutoff).length
+            fetched = true
+          }
+        } catch { /* CORS or network — try RSS */ }
+        if (!fetched) {
+          const rssRes = await fetch('https://api.politiet.no/politiloggen/v1/rss')
+          const xml    = new DOMParser().parseFromString(await rssRes.text(), 'text/xml')
+          const cutoff = Date.now() - 24 * 3600 * 1000
+          policeCount  = Array.from(xml.querySelectorAll('item'))
+            .filter(item => {
+              const pub  = item.querySelector('pubDate')?.textContent
+              const text = (item.querySelector('title')?.textContent ?? '') +
+                           (item.querySelector('description')?.textContent ?? '')
+              return pub && new Date(pub).getTime() > cutoff &&
+                     text.toLowerCase().includes(city.toLowerCase())
+            }).length
         }
-      } catch { /* CORS or network — try RSS */ }
-
-      if (!fetched) {
-        const rssRes = await fetch('https://api.politiet.no/politiloggen/v1/rss')
-        const xml    = new DOMParser().parseFromString(await rssRes.text(), 'text/xml')
-        const cutoff = Date.now() - 24 * 3600 * 1000
-        policeCount  = Array.from(xml.querySelectorAll('item'))
-          .filter(item => {
-            const pub  = item.querySelector('pubDate')?.textContent
-            const text = (item.querySelector('title')?.textContent ?? '') +
-                         (item.querySelector('description')?.textContent ?? '')
-            return pub && new Date(pub).getTime() > cutoff &&
-                   text.toLowerCase().includes(city.toLowerCase())
-          }).length
-      }
-      policeScoreVal = policeScore(policeCount)
-    } catch { /* Politiloggen unavailable */ }
+        policeScoreVal = policeScore(policeCount)
+        sources.police = { status: 'ok', latencyMs: Date.now() - t0, raw: `${policeCount} hendelser/24h` }
+      } catch { sources.police = { status: 'error', latencyMs: Date.now() - t0, raw: null } }
+    }
 
     // Bluesky — public AT Protocol search, no auth required
     let bskyCount = null, bskyScoreVal = null
-    try {
-      const since  = new Date(Date.now() - 24 * 3600 * 1000).toISOString()
-      const bskyQ  = encodeURIComponent(
-        `${city} (uro OR støy OR protest OR demonstrasjon OR bråk OR konflikt)`
-      )
-      const bskyRes = await fetch(
-        `https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts` +
-        `?q=${bskyQ}&limit=25&since=${since}&lang=no`
-      )
-      const bsky = await bskyRes.json()
-      bskyCount  = bsky?.posts?.length ?? 0
-      bskyScoreVal = blueskyScore(bskyCount)
-    } catch { /* Bluesky unavailable */ }
+    {
+      const t0 = Date.now()
+      try {
+        const since  = new Date(Date.now() - 24 * 3600 * 1000).toISOString()
+        const bskyQ  = encodeURIComponent(
+          `${city} (uro OR støy OR protest OR demonstrasjon OR bråk OR konflikt)`
+        )
+        const bskyRes = await fetch(
+          `https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts` +
+          `?q=${bskyQ}&limit=25&since=${since}&lang=no`
+        )
+        const bsky = await bskyRes.json()
+        bskyCount  = bsky?.posts?.length ?? 0
+        bskyScoreVal = blueskyScore(bskyCount)
+        sources.bluesky = { status: 'ok', latencyMs: Date.now() - t0, raw: `${bskyCount} posts/24h` }
+      } catch { sources.bluesky = { status: 'error', latencyMs: Date.now() - t0, raw: null } }
+    }
 
     // Reddit — r/norge + r/oslo public search, no auth required
     let redditCount = null, redditScoreVal = null
-    try {
-      const rdQ   = encodeURIComponent(city)
-      const rdRes = await fetch(
-        `https://www.reddit.com/r/norge+oslo/search.json` +
-        `?q=${rdQ}&sort=new&restrict_sr=on&t=day&limit=25&raw_json=1`,
-        { headers: { Accept: 'application/json' } }
-      )
-      const rd = await rdRes.json()
-      redditCount  = rd?.data?.children?.length ?? 0
-      redditScoreVal = redditScore(redditCount)
-    } catch { /* Reddit unavailable — soft-fail */ }
+    {
+      const t0 = Date.now()
+      try {
+        const rdQ   = encodeURIComponent(city)
+        const rdRes = await fetch(
+          `https://www.reddit.com/r/norge+oslo/search.json` +
+          `?q=${rdQ}&sort=new&restrict_sr=on&t=day&limit=25&raw_json=1`,
+          { headers: { Accept: 'application/json' } }
+        )
+        const rd = await rdRes.json()
+        redditCount    = rd?.data?.children?.length ?? 0
+        redditScoreVal = redditScore(redditCount)
+        sources.reddit = { status: 'ok', latencyMs: Date.now() - t0, raw: `${redditCount} posts/day` }
+      } catch { sources.reddit = { status: 'error', latencyMs: Date.now() - t0, raw: null } }
+    }
 
     // Statens Vegvesen NVDB — active road works (type 596) within ~5 km bounding box
     let vegCount = null, vegScoreVal = null
-    try {
-      const latN  = parseFloat(lat)
-      const lonN  = parseFloat(lon)
-      const dLat  = 0.045
-      const dLon  = 0.045 / Math.cos((latN * Math.PI) / 180)
-      const bbox  = [
-        (lonN - dLon).toFixed(5), (latN - dLat).toFixed(5),
-        (lonN + dLon).toFixed(5), (latN + dLat).toFixed(5),
-      ].join(',')
-      const vegRes = await fetch(
-        `https://nvdbapiles-v3.atlas.vegvesen.no/vegobjekter/596` +
-        `?kartutsnitt=${bbox}&inkluder=metadata&antall=25`,
-        { headers: { Accept: 'application/json', 'X-Client': 'Aether/1.0' } }
-      )
-      const vegData = await vegRes.json()
-      const now = Date.now()
-      vegCount = (vegData?.objekter ?? []).filter(o => {
-        const end = o?.metadata?.sluttdato
-        return !end || new Date(end).getTime() > now
-      }).length
-      vegScoreVal = vegvesenScore(vegCount)
-    } catch { /* NVDB unavailable — soft-fail */ }
+    {
+      const t0 = Date.now()
+      try {
+        const latN = parseFloat(lat), lonN = parseFloat(lon)
+        const dLat = 0.045, dLon = 0.045 / Math.cos((latN * Math.PI) / 180)
+        const bbox = [
+          (lonN - dLon).toFixed(5), (latN - dLat).toFixed(5),
+          (lonN + dLon).toFixed(5), (latN + dLat).toFixed(5),
+        ].join(',')
+        const vegRes = await fetch(
+          `https://nvdbapiles-v3.atlas.vegvesen.no/vegobjekter/596` +
+          `?kartutsnitt=${bbox}&inkluder=metadata&antall=25`,
+          { headers: { Accept: 'application/json', 'X-Client': 'Aether/1.0' } }
+        )
+        const vegData = await vegRes.json()
+        const now = Date.now()
+        vegCount = (vegData?.objekter ?? []).filter(o => {
+          const end = o?.metadata?.sluttdato
+          return !end || new Date(end).getTime() > now
+        }).length
+        vegScoreVal = vegvesenScore(vegCount)
+        sources.traffic = { status: 'ok', latencyMs: Date.now() - t0, raw: `${vegCount} vegarbeid/5 km` }
+      } catch { sources.traffic = { status: 'error', latencyMs: Date.now() - t0, raw: null } }
+    }
 
     // Open-Meteo Air Quality — European AQI + PM2.5
     let aqiVal = null, pm25Val = null, airScoreVal = null
-    try {
-      const aqRes = await fetch(
-        `https://air-quality-api.open-meteo.com/v1/air-quality` +
-        `?latitude=${lat}&longitude=${lon}&current=european_aqi,pm2_5`
-      )
-      const aqData = await aqRes.json()
-      aqiVal      = aqData?.current?.european_aqi ?? null
-      pm25Val     = aqData?.current?.pm2_5        ?? null
-      airScoreVal = airQualityScore(aqiVal)
-    } catch { /* Open-Meteo AQ unavailable — soft-fail */ }
+    {
+      const t0 = Date.now()
+      try {
+        const aqRes = await fetch(
+          `https://air-quality-api.open-meteo.com/v1/air-quality` +
+          `?latitude=${lat}&longitude=${lon}&current=european_aqi,pm2_5`
+        )
+        const aqData = await aqRes.json()
+        aqiVal      = aqData?.current?.european_aqi ?? null
+        pm25Val     = aqData?.current?.pm2_5        ?? null
+        airScoreVal = airQualityScore(aqiVal)
+        sources.air = {
+          status: 'ok', latencyMs: Date.now() - t0,
+          raw: aqiVal != null
+            ? `AQI ${aqiVal}${pm25Val != null ? ` · PM2.5 ${pm25Val.toFixed(1)}` : ''}`
+            : '—',
+        }
+      } catch { sources.air = { status: 'error', latencyMs: Date.now() - t0, raw: null } }
+    }
 
+    // OSM Overpass — communication tower density
     let emCount = null, emScoreVal = null
-    try {
-      const oq =
-        `[out:json][timeout:15];` +
-        `(node["tower:type"="communication"](around:5000,${lat},${lon});` +
-        `way["tower:type"="communication"](around:5000,${lat},${lon}););` +
-        `out count;`
-      const osmRes = await fetch('https://overpass-api.de/api/interpreter', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `data=${encodeURIComponent(oq)}`,
-      })
-      const osm  = await osmRes.json()
-      emCount    = parseInt(osm?.elements?.[0]?.tags?.total ?? '0', 10)
-      emScoreVal = emDensityScore(emCount)
-    } catch { /* Overpass unavailable */ }
+    {
+      const t0 = Date.now()
+      try {
+        const oq =
+          `[out:json][timeout:15];` +
+          `(node["tower:type"="communication"](around:5000,${lat},${lon});` +
+          `way["tower:type"="communication"](around:5000,${lat},${lon}););` +
+          `out count;`
+        const osmRes = await fetch('https://overpass-api.de/api/interpreter', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: `data=${encodeURIComponent(oq)}`,
+        })
+        const osm  = await osmRes.json()
+        emCount    = parseInt(osm?.elements?.[0]?.tags?.total ?? '0', 10)
+        emScoreVal = emDensityScore(emCount)
+        sources.em = { status: 'ok', latencyMs: Date.now() - t0, raw: `${emCount} towers/5 km` }
+      } catch { sources.em = { status: 'error', latencyMs: Date.now() - t0, raw: null } }
+    }
 
     const elev     = elevationScore(elevationM)
     const kinetic  = kineticCalmScore(kineticReading?.dominantHz ?? null)
     const acoustic = acousticCalmScore(acousticReading?.dominantHz ?? null)
 
+    sources.elev = elevationM != null
+      ? { status: 'ok',      latencyMs: null, raw: `${elevationM} m asl` }
+      : { status: 'skipped', latencyMs: null, raw: null }
+    sources.kinetic = kineticReading
+      ? { status: 'ok',      latencyMs: null, raw: `${kineticReading.dominantHz?.toFixed(2) ?? '?'} Hz · ${kineticReading.zone ?? 'unknown'}` }
+      : { status: 'skipped', latencyMs: null, raw: null }
+    sources.acoustic = acousticReading
+      ? { status: 'ok',      latencyMs: null, raw: `${acousticReading.dominantHz?.toFixed(2) ?? '?'} Hz · ${acousticReading.zone ?? 'unknown'}` }
+      : { status: 'skipped', latencyMs: null, raw: null }
+
     setResult({
       city, policeCount, bskyCount, redditCount, vegCount, aqiVal, pm25Val, elevationM, emCount,
+      sources,
       scores: { police: policeScoreVal, bluesky: bskyScoreVal, reddit: redditScoreVal, traffic: vegScoreVal, air: airScoreVal, elev, em: emScoreVal, kinetic, acoustic },
       aether: compositeAether([policeScoreVal, bskyScoreVal, redditScoreVal, vegScoreVal, airScoreVal, elev, emScoreVal, kinetic, acoustic]),
     })
@@ -832,19 +871,62 @@ function AtmosphericCard({ sensor, tier }) {
   )
 }
 
-function ScoreGauge({ label, value, detail }) {
-  if (value == null) return null
-  const color = value >= 70 ? '#34d399' : value >= 40 ? '#fbbf24' : '#f87171'
+function ScoreGauge({ label, value, detail, status }) {
+  const hasValue = value != null
+  const color = hasValue ? (value >= 70 ? '#34d399' : value >= 40 ? '#fbbf24' : '#f87171') : '#1f2937'
+  const dotColor = status === 'ok' ? '#34d399' : status === 'error' ? '#ef4444' : '#374151'
   return (
     <div className="score-row">
       <div className="score-row-head">
+        <span className="score-dot" style={{ background: dotColor }} />
         <span className="score-row-label">{label}</span>
         {detail && <span className="score-row-detail">{detail}</span>}
-        <span className="score-row-val" style={{ color }}>{value}</span>
+        <span className="score-row-val" style={{ color: hasValue ? color : '#374151' }}>
+          {hasValue ? value : '—'}
+        </span>
       </div>
       <div className="score-bar-wrap">
-        <div className="score-bar" style={{ width: `${value}%`, background: color }} />
+        {hasValue && <div className="score-bar" style={{ width: `${value}%`, background: color }} />}
       </div>
+    </div>
+  )
+}
+
+const SOURCE_META = {
+  police:  { label: 'Police Log',   domain: 'api.politiet.no' },
+  bluesky: { label: 'Bluesky',      domain: 'public.api.bsky.app' },
+  reddit:  { label: 'Reddit',       domain: 'reddit.com' },
+  traffic: { label: 'Traffic',      domain: 'nvdbapiles-v3.atlas.vegvesen.no' },
+  air:     { label: 'Air Quality',  domain: 'air-quality-api.open-meteo.com' },
+  elev:    { label: 'Terrain',      domain: 'api.open-meteo.com' },
+  em:      { label: 'EM Density',   domain: 'overpass-api.de' },
+  kinetic: { label: 'Ground',       domain: 'DeviceMotion API' },
+  acoustic:{ label: 'Acoustic',     domain: 'Microphone API' },
+}
+
+function SourcesPanel({ sources }) {
+  return (
+    <div className="sources-panel">
+      {Object.entries(SOURCE_META).map(([key, meta]) => {
+        const src = sources?.[key]
+        const dotColor = src?.status === 'ok' ? '#34d399' : src?.status === 'error' ? '#ef4444' : '#374151'
+        const rawText  = src?.raw
+          ?? (src?.status === 'error' ? 'unavailable' : src?.status === 'skipped' ? 'not active' : '—')
+        return (
+          <div key={key} className="source-row">
+            <span className="source-dot" style={{ background: dotColor }} />
+            <span className="source-label">{meta.label}</span>
+            <span className="source-domain">{meta.domain}</span>
+            <span className={`source-raw${src?.status === 'error' ? ' source-raw-err' : ''}`}>
+              {rawText}
+            </span>
+            {src?.latencyMs != null
+              ? <span className="source-latency">{src.latencyMs} ms</span>
+              : <span className="source-latency" />
+            }
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -881,6 +963,7 @@ function LocationScoreCard({ atmospheric, kinetic, acoustic, onSave, history }) 
   const reading = atmospheric.reading
   const savedRef = useRef(null)
   const [delta, setDelta] = useState(null)
+  const [showSources, setShowSources] = useState(false)
 
   const handleCompute = useCallback(() => {
     if (!reading) return
@@ -939,17 +1022,23 @@ function LocationScoreCard({ atmospheric, kinetic, acoustic, onSave, history }) 
       )}
 
       {result && (
-        <div className="score-breakdown">
-          <ScoreGauge label="Police Log"  value={result.scores.police}   detail={result.policeCount  != null ? `${result.policeCount} hendelser/24h`  : null} />
-          <ScoreGauge label="Bluesky"     value={result.scores.bluesky}  detail={result.bskyCount    != null ? `${result.bskyCount} innlegg/24h`     : null} />
-          <ScoreGauge label="Reddit"      value={result.scores.reddit}   detail={result.redditCount  != null ? `${result.redditCount} posts/24h`      : null} />
-          <ScoreGauge label="Traffic"     value={result.scores.traffic}  detail={result.vegCount    != null ? `${result.vegCount} vegarbeid/5 km`  : null} />
-          <ScoreGauge label="Air Quality" value={result.scores.air}      detail={result.aqiVal      != null ? `AQI ${result.aqiVal}${result.pm25Val != null ? ` · PM2.5 ${result.pm25Val.toFixed(1)}` : ''}` : null} />
-          <ScoreGauge label="Terrain"     value={result.scores.elev}     detail={result.elevationM  != null ? `${result.elevationM} m asl`          : null} />
-          <ScoreGauge label="EM Density"  value={result.scores.em}       detail={result.emCount     != null ? `${result.emCount} towers/5 km`       : null} />
-          <ScoreGauge label="Ground"      value={result.scores.kinetic}  detail={kinetic.reading?.dominantHz  != null ? `${kinetic.reading.dominantHz.toFixed(1)} Hz`  : null} />
-          <ScoreGauge label="Acoustic"    value={result.scores.acoustic} detail={acoustic.reading?.dominantHz != null ? `${acoustic.reading.dominantHz.toFixed(1)} Hz` : null} />
-        </div>
+        <>
+          <div className="score-breakdown">
+            <ScoreGauge label="Police Log"  value={result.scores.police}   status={result.sources?.police?.status}  detail={result.policeCount  != null ? `${result.policeCount} hendelser/24h`  : null} />
+            <ScoreGauge label="Bluesky"     value={result.scores.bluesky}  status={result.sources?.bluesky?.status} detail={result.bskyCount    != null ? `${result.bskyCount} innlegg/24h`     : null} />
+            <ScoreGauge label="Reddit"      value={result.scores.reddit}   status={result.sources?.reddit?.status}  detail={result.redditCount  != null ? `${result.redditCount} posts/24h`      : null} />
+            <ScoreGauge label="Traffic"     value={result.scores.traffic}  status={result.sources?.traffic?.status} detail={result.vegCount     != null ? `${result.vegCount} vegarbeid/5 km`   : null} />
+            <ScoreGauge label="Air Quality" value={result.scores.air}      status={result.sources?.air?.status}     detail={result.aqiVal       != null ? `AQI ${result.aqiVal}${result.pm25Val != null ? ` · PM2.5 ${result.pm25Val.toFixed(1)}` : ''}` : null} />
+            <ScoreGauge label="Terrain"     value={result.scores.elev}     status={result.sources?.elev?.status}    detail={result.elevationM   != null ? `${result.elevationM} m asl`           : null} />
+            <ScoreGauge label="EM Density"  value={result.scores.em}       status={result.sources?.em?.status}      detail={result.emCount      != null ? `${result.emCount} towers/5 km`        : null} />
+            <ScoreGauge label="Ground"      value={result.scores.kinetic}  status={result.sources?.kinetic?.status} detail={kinetic.reading?.dominantHz  != null ? `${kinetic.reading.dominantHz.toFixed(1)} Hz`  : null} />
+            <ScoreGauge label="Acoustic"    value={result.scores.acoustic} status={result.sources?.acoustic?.status} detail={acoustic.reading?.dominantHz != null ? `${acoustic.reading.dominantHz.toFixed(1)} Hz` : null} />
+          </div>
+          <button className="sources-toggle" onClick={() => setShowSources(p => !p)}>
+            Data Sources {showSources ? '▴' : '▾'}
+          </button>
+          {showSources && <SourcesPanel sources={result.sources} />}
+        </>
       )}
 
       <button
