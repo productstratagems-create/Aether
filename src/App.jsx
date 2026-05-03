@@ -1131,9 +1131,10 @@ function MapPanel({ history, currentLat, currentLon, currentScore }) {
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return
     mapRef.current = L.map(containerRef.current, { zoomControl: true })
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>',
-      maxZoom: 19,
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      attribution: '© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
+      subdomains: 'abcd',
+      maxZoom: 20,
     }).addTo(mapRef.current)
     return () => { mapRef.current?.remove(); mapRef.current = null }
   }, [])
@@ -1151,9 +1152,13 @@ function MapPanel({ history, currentLat, currentLon, currentScore }) {
       if (isNaN(lat) || isNaN(lon)) return
       const s = entry.aether
       const fill = s >= 70 ? '#34d399' : s >= 40 ? '#fbbf24' : '#f87171'
-      const m = L.circleMarker([lat, lon], {
-        radius: 7, fillColor: fill, fillOpacity: 0.85, color: '#fff', weight: 1.5,
-      }).bindPopup(`<b>${entry.city}</b><br>Score: ${s ?? '—'}`)
+      const icon = L.divIcon({
+        className: '',
+        html: `<div class="map-score-marker" style="background:${fill}">${s ?? '?'}</div>`,
+        iconSize: [28, 28], iconAnchor: [14, 14], popupAnchor: [0, -16],
+      })
+      const m = L.marker([lat, lon], { icon })
+        .bindPopup(`<b>${entry.city}</b><br>Score: ${s ?? '—'}`)
       m.addTo(map)
       markersRef.current.push(m)
       bounds.push([lat, lon])
@@ -1164,9 +1169,13 @@ function MapPanel({ history, currentLat, currentLon, currentScore }) {
       if (!isNaN(lat) && !isNaN(lon)) {
         const s = currentScore
         const fill = s != null ? (s >= 70 ? '#34d399' : s >= 40 ? '#fbbf24' : '#f87171') : '#818cf8'
-        const m = L.circleMarker([lat, lon], {
-          radius: 10, fillColor: fill, fillOpacity: 0.95, color: '#fff', weight: 2.5,
-        }).bindPopup(`<b>Current location</b>${s != null ? `<br>Score: ${s}` : ''}`)
+        const icon = L.divIcon({
+          className: '',
+          html: `<div class="map-score-marker map-score-marker--current" style="background:${fill}">${s ?? '?'}</div>`,
+          iconSize: [36, 36], iconAnchor: [18, 18], popupAnchor: [0, -20],
+        })
+        const m = L.marker([lat, lon], { icon })
+          .bindPopup(`<b>Current location</b>${s != null ? `<br>Score: ${s}` : ''}`)
         m.addTo(map)
         markersRef.current.push(m)
         bounds.push([lat, lon])
