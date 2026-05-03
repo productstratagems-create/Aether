@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 import { classify } from './classify.js'
 
 // ─── FFT / Spectrum utilities ─────────────────────────────────────────────────
@@ -1119,6 +1121,68 @@ function LocationHistoryPanel({ history, onRemove, onClear }) {
   )
 }
 
+// ─── Map Panel ────────────────────────────────────────────────────────────────
+
+function MapPanel({ history, currentLat, currentLon, currentScore }) {
+  const containerRef = useRef(null)
+  const mapRef       = useRef(null)
+  const markersRef   = useRef([])
+
+  useEffect(() => {
+    if (!containerRef.current || mapRef.current) return
+    mapRef.current = L.map(containerRef.current, { zoomControl: true })
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>',
+      maxZoom: 19,
+    }).addTo(mapRef.current)
+    return () => { mapRef.current?.remove(); mapRef.current = null }
+  }, [])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    markersRef.current.forEach(m => m.remove())
+    markersRef.current = []
+    const bounds = []
+
+    history.forEach(entry => {
+      if (!entry.lat || !entry.lon) return
+      const lat = parseFloat(entry.lat), lon = parseFloat(entry.lon)
+      if (isNaN(lat) || isNaN(lon)) return
+      const s = entry.aether
+      const fill = s >= 70 ? '#34d399' : s >= 40 ? '#fbbf24' : '#f87171'
+      const m = L.circleMarker([lat, lon], {
+        radius: 7, fillColor: fill, fillOpacity: 0.85, color: '#fff', weight: 1.5,
+      }).bindPopup(`<b>${entry.city}</b><br>Score: ${s ?? '—'}`)
+      m.addTo(map)
+      markersRef.current.push(m)
+      bounds.push([lat, lon])
+    })
+
+    if (currentLat && currentLon) {
+      const lat = parseFloat(currentLat), lon = parseFloat(currentLon)
+      if (!isNaN(lat) && !isNaN(lon)) {
+        const s = currentScore
+        const fill = s != null ? (s >= 70 ? '#34d399' : s >= 40 ? '#fbbf24' : '#f87171') : '#818cf8'
+        const m = L.circleMarker([lat, lon], {
+          radius: 10, fillColor: fill, fillOpacity: 0.95, color: '#fff', weight: 2.5,
+        }).bindPopup(`<b>Current location</b>${s != null ? `<br>Score: ${s}` : ''}`)
+        m.addTo(map)
+        markersRef.current.push(m)
+        bounds.push([lat, lon])
+      }
+    }
+
+    if (bounds.length === 1) {
+      map.setView(bounds[0], 13)
+    } else if (bounds.length > 1) {
+      map.fitBounds(L.latLngBounds(bounds), { padding: [32, 32], maxZoom: 14 })
+    }
+  }, [history, currentLat, currentLon, currentScore])
+
+  return <div ref={containerRef} className="map-panel" />
+}
+
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -1201,6 +1265,14 @@ export default function App() {
         )
       }
 
+      {(history.some(e => e.lat && e.lon) || atmospheric.reading) && (
+        <MapPanel
+          history={history}
+          currentLat={atmospheric.reading?.lat ?? null}
+          currentLon={atmospheric.reading?.lon ?? null}
+          currentScore={history[0]?.aether ?? null}
+        />
+      )}
       <LocationHistoryPanel history={history} onRemove={remove} onClear={clear} />
     </div>
   )
