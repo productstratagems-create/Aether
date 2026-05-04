@@ -1124,27 +1124,71 @@ function LocationHistoryPanel({ history, onRemove, onClear }) {
 // ─── Map Panel ────────────────────────────────────────────────────────────────
 
 function MapPanel({ history, currentLat, currentLon, currentScore }) {
-  const containerRef = useRef(null)
-  const mapRef       = useRef(null)
-  const markersRef   = useRef([])
+  const containerRef    = useRef(null)
+  const gestureHintRef  = useRef(null)
+  const mapRef          = useRef(null)
+  const markersRef      = useRef([])
+  const polylineRef     = useRef(null)
+  const gestureTimerRef = useRef(null)
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return
-    mapRef.current = L.map(containerRef.current, { zoomControl: true })
+    mapRef.current = L.map(containerRef.current, {
+      zoomControl: true,
+      scrollWheelZoom: false,
+    })
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
       attribution: '© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
       subdomains: 'abcd',
       maxZoom: 20,
     }).addTo(mapRef.current)
-    return () => { mapRef.current?.remove(); mapRef.current = null }
+
+    const el = containerRef.current
+    const onWheel = e => {
+      if (e.ctrlKey) {
+        mapRef.current?.scrollWheelZoom.enable()
+        clearTimeout(gestureTimerRef.current)
+        gestureTimerRef.current = setTimeout(() => mapRef.current?.scrollWheelZoom.disable(), 600)
+      } else {
+        gestureHintRef.current?.classList.add('map-gesture-hint--visible')
+        clearTimeout(gestureTimerRef.current)
+        gestureTimerRef.current = setTimeout(() => {
+          gestureHintRef.current?.classList.remove('map-gesture-hint--visible')
+        }, 1500)
+      }
+    }
+    el.addEventListener('wheel', onWheel, { passive: true })
+
+    return () => {
+      el.removeEventListener('wheel', onWheel)
+      clearTimeout(gestureTimerRef.current)
+      mapRef.current?.remove()
+      mapRef.current = null
+    }
   }, [])
 
   useEffect(() => {
     const map = mapRef.current
     if (!map) return
+
     markersRef.current.forEach(m => m.remove())
     markersRef.current = []
+    polylineRef.current?.remove()
+    polylineRef.current = null
+
     const bounds = []
+
+    // Draw dashed trail in chronological order (history is newest-first)
+    const trailCoords = [...history]
+      .reverse()
+      .filter(e => e.lat && e.lon)
+      .map(e => [parseFloat(e.lat), parseFloat(e.lon)])
+      .filter(([lat, lon]) => !isNaN(lat) && !isNaN(lon))
+    if (trailCoords.length >= 2) {
+      polylineRef.current = L.polyline(trailCoords, {
+        color: '#6b7280', weight: 2, dashArray: '4 6', opacity: 0.7,
+      }).addTo(map)
+    }
 
     history.forEach(entry => {
       if (!entry.lat || !entry.lon) return
@@ -1189,7 +1233,12 @@ function MapPanel({ history, currentLat, currentLon, currentScore }) {
     }
   }, [history, currentLat, currentLon, currentScore])
 
-  return <div ref={containerRef} className="map-panel" />
+  return (
+    <div className="map-wrapper">
+      <div ref={containerRef} className="map-panel" />
+      <div ref={gestureHintRef} className="map-gesture-hint">Use Ctrl + scroll to zoom</div>
+    </div>
+  )
 }
 
 // ─── App ──────────────────────────────────────────────────────────────────────
