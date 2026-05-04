@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+import tailwindcss from '@tailwindcss/vite'
 
 const REPO_NAME = 'Aether'
 
@@ -8,6 +9,7 @@ export default defineConfig({
   base: `/${REPO_NAME}/`,
 
   plugins: [
+    tailwindcss(),
     react(),
 
     VitePWA({
