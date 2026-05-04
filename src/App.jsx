@@ -252,7 +252,7 @@ function useAcousticSensor() {
   runCycleRef.current = () => {
     if (!activeRef.current) return
 
-    // ── Capture phase ────────────────────────────────────────────────────────
+    // ── Capture phase ───────────────────────────────────────────────────
     setStatus('listening')
     bufferRef.current = []
 
@@ -494,15 +494,24 @@ function ScoreSparkline({ values }) {
   if (!values || values.length < 2) return null
   const max = Math.max(...values), min = Math.min(...values)
   const range = Math.max(max - min, 5)
-  const W = 52, H = 16
-  const pts = values.map((v, i) => {
-    const x = (i / (values.length - 1)) * W
-    const y = H - ((v - min) / range) * (H - 2) - 1
-    return `${x.toFixed(1)},${y.toFixed(1)}`
-  }).join(' ')
+  const W = 300, H = 48, pad = 4
+  const pts = values.map((v, i) => [
+    pad + (i / (values.length - 1)) * (W - pad * 2),
+    H - pad - ((v - min) / range) * (H - pad * 2),
+  ])
+  const linePts = pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ')
+  const areaPts = [
+    `${pts[0][0].toFixed(1)},${H}`,
+    ...pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`),
+    `${pts[pts.length - 1][0].toFixed(1)},${H}`,
+  ].join(' ')
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="score-sparkline">
-      <polyline points={pts} fill="none" stroke="#7c3aed" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+      <polygon points={areaPts} fill="#7c3aed" fillOpacity="0.12" />
+      <polyline points={linePts} fill="none" stroke="#7c3aed" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+      {pts.map(([x, y], i) => (
+        <circle key={i} cx={x.toFixed(1)} cy={y.toFixed(1)} r="2.5" fill="#7c3aed" />
+      ))}
     </svg>
   )
 }
@@ -518,14 +527,22 @@ function useLocationScore() {
     let city = 'Unknown'
     try {
       const geoRes = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`
+        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&zoom=18&addressdetails=1`
       )
       const geo = await geoRes.json()
       city =
-        geo?.address?.city    ??
-        geo?.address?.town    ??
-        geo?.address?.village ??
-        geo?.address?.county  ??
+        geo?.address?.amenity       ??
+        geo?.address?.leisure       ??
+        geo?.address?.tourism       ??
+        geo?.address?.natural       ??
+        geo?.address?.neighbourhood ??
+        geo?.address?.suburb        ??
+        geo?.address?.quarter       ??
+        geo?.address?.city_district ??
+        geo?.address?.city          ??
+        geo?.address?.town          ??
+        geo?.address?.village       ??
+        geo?.address?.county        ??
         geo?.display_name?.split(',')[0] ??
         'Unknown'
     } catch { /* proceed */ }
@@ -991,19 +1008,20 @@ function LocationScoreCard({ atmospheric, kinetic, acoustic, onSave, history }) 
       </div>
 
       {result?.aether != null && (
-        <div className="aether-score-wrap">
-          <span className="aether-score-val">{result.aether}</span>
-          <span className="aether-score-sub">/100</span>
-          {delta != null && (
-            <span className="aether-delta" style={{
-              color: delta > 2 ? '#34d399' : delta < -2 ? '#f87171' : '#6b7280',
-            }}>
-              {delta > 2 ? `▲ ${delta}` : delta < -2 ? `▼ ${Math.abs(delta)}` : '→'}
-            </span>
-          )}
-          <div style={{ flex: 1 }} />
+        <>
+          <div className="aether-score-wrap">
+            <span className="aether-score-val">{result.aether}</span>
+            <span className="aether-score-sub">/100</span>
+            {delta != null && (
+              <span className="aether-delta" style={{
+                color: delta > 2 ? '#34d399' : delta < -2 ? '#f87171' : '#6b7280',
+              }}>
+                {delta > 2 ? `▲ ${delta}` : delta < -2 ? `▼ ${Math.abs(delta)}` : '→'}
+              </span>
+            )}
+          </div>
           {sparkValues.length >= 2 && <ScoreSparkline values={sparkValues} />}
-        </div>
+        </>
       )}
 
       {result && (
@@ -1123,13 +1141,20 @@ function LocationHistoryPanel({ history, onRemove, onClear }) {
 
 // ─── Map Panel ────────────────────────────────────────────────────────────────
 
+const TILE_URLS = {
+  dark:  'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+  light: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+}
+
 function MapPanel({ history, currentLat, currentLon, currentScore }) {
   const containerRef    = useRef(null)
   const gestureHintRef  = useRef(null)
   const mapRef          = useRef(null)
   const markersRef      = useRef([])
   const polylineRef     = useRef(null)
+  const tileRef         = useRef(null)
   const gestureTimerRef = useRef(null)
+  const [mapStyle, setMapStyle] = useState('dark')
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return
@@ -1137,11 +1162,6 @@ function MapPanel({ history, currentLat, currentLon, currentScore }) {
       zoomControl: true,
       scrollWheelZoom: false,
     })
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: '© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
-      subdomains: 'abcd',
-      maxZoom: 20,
-    }).addTo(mapRef.current)
 
     const el = containerRef.current
     const onWheel = e => {
@@ -1166,6 +1186,16 @@ function MapPanel({ history, currentLat, currentLon, currentScore }) {
       mapRef.current = null
     }
   }, [])
+
+  useEffect(() => {
+    if (!mapRef.current) return
+    tileRef.current?.remove()
+    tileRef.current = L.tileLayer(TILE_URLS[mapStyle], {
+      attribution: '© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
+      subdomains: 'abcd',
+      maxZoom: 20,
+    }).addTo(mapRef.current)
+  }, [mapStyle])
 
   useEffect(() => {
     const map = mapRef.current
@@ -1234,9 +1264,16 @@ function MapPanel({ history, currentLat, currentLon, currentScore }) {
   }, [history, currentLat, currentLon, currentScore])
 
   return (
-    <div className="map-wrapper">
+    <div className="map-wrapper" data-map-style={mapStyle}>
       <div ref={containerRef} className="map-panel" />
       <div ref={gestureHintRef} className="map-gesture-hint">Use Ctrl + scroll to zoom</div>
+      <button
+        className="map-style-toggle"
+        onClick={() => setMapStyle(s => s === 'dark' ? 'light' : 'dark')}
+        title={mapStyle === 'dark' ? 'Switch to light map' : 'Switch to dark map'}
+      >
+        {mapStyle === 'dark' ? '☀' : '◑'}
+      </button>
     </div>
   )
 }
