@@ -858,13 +858,38 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 
 /* ─── Map Panel ───────────────────────────────────────────────────────────── */
 
+.map-wrapper {
+  position: relative;
+  margin: 1.5rem 0;
+}
+
 .map-panel {
   width: 100%;
   height: 320px;
   border-radius: 12px;
   overflow: hidden;
-  margin: 1.5rem 0;
   border: 1px solid #1f2937;
+}
+
+.map-gesture-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  color: #e5e7eb;
+  font-size: 0.78rem;
+  font-family: 'Courier New', monospace;
+  border-radius: 12px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s;
+  z-index: 500;
+}
+
+.map-gesture-hint--visible {
+  opacity: 1;
 }
 
 /* Leaflet attribution dark-mode fix */
