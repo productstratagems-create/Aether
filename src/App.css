@@ -561,9 +561,11 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 
 /* Score sparkline & delta */
 .score-sparkline {
-  opacity: 0.85;
-  flex-shrink: 0;
-  align-self: center;
+  display: block;
+  width: 100%;
+  height: auto;
+  opacity: 0.9;
+  margin-bottom: 0.5rem;
 }
 
 .aether-delta {
@@ -888,26 +890,61 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   z-index: 500;
 }
 
-.map-gesture-hint--visible {
-  opacity: 1;
-}
+.map-gesture-hint--visible { opacity: 1; }
 
-/* Leaflet attribution dark-mode fix */
-.map-panel .leaflet-control-attribution {
+.map-style-toggle {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 500;
+  margin-top: 0;
+  background: rgba(17, 24, 39, 0.85);
+  color: #9ca3af;
+  font-size: 0.82rem;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 4px;
+  border: 1px solid #374151;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(2px);
+}
+.map-style-toggle:hover { color: #e5e7eb; border-color: #6b7280; }
+
+/* Dark map theme */
+[data-map-style="dark"] .map-panel .leaflet-control-attribution {
   background: rgba(17, 24, 39, 0.8);
   color: #6b7280;
   font-size: 0.6rem;
 }
-.map-panel .leaflet-control-attribution a { color: #6b7280; }
-
-.map-panel .leaflet-popup-content-wrapper {
+[data-map-style="dark"] .map-panel .leaflet-control-attribution a { color: #6b7280; }
+[data-map-style="dark"] .map-panel .leaflet-popup-content-wrapper {
   background: #111827;
   color: #e0e0e0;
   border: 1px solid #1f2937;
   border-radius: 8px;
   font-size: 0.75rem;
 }
-.map-panel .leaflet-popup-tip { background: #111827; }
+[data-map-style="dark"] .map-panel .leaflet-popup-tip { background: #111827; }
+
+/* Light map theme */
+[data-map-style="light"] .map-style-toggle {
+  background: rgba(255, 255, 255, 0.85);
+  color: #374151;
+  border-color: #d1d5db;
+}
+[data-map-style="light"] .map-style-toggle:hover { color: #111827; border-color: #9ca3af; }
+[data-map-style="light"] .map-panel .leaflet-popup-content-wrapper {
+  background: #fff;
+  color: #1f2937;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  font-size: 0.75rem;
+}
+[data-map-style="light"] .map-panel .leaflet-popup-tip { background: #fff; }
 
 .map-score-marker {
   width: 28px;
