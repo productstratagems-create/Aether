@@ -6,7 +6,7 @@ import ScoreSparkline from './ScoreSparkline.jsx'
 import ScoreGauge from './ScoreGauge.jsx'
 import SourcesPanel from './SourcesPanel.jsx'
 
-export default function AetherScoreCard({ atmospheric, kinetic, acoustic, onSave, history }) {
+export default function AetherScoreCard({ atmospheric, kinetic, acoustic, magnetometer, onSave, history }) {
   const { status, result, compute } = useLocationScore()
   const reading   = atmospheric.reading
   const savedRef  = useRef(null)
@@ -15,7 +15,7 @@ export default function AetherScoreCard({ atmospheric, kinetic, acoustic, onSave
 
   const handleCompute = () => {
     if (!reading) return
-    compute(reading.lat, reading.lon, reading.elevationM, kinetic.reading, acoustic.reading)
+    compute(reading.lat, reading.lon, reading.elevationM, kinetic.reading, acoustic.reading, magnetometer?.reading ?? null)
   }
 
   useEffect(() => {
@@ -25,18 +25,18 @@ export default function AetherScoreCard({ atmospheric, kinetic, acoustic, onSave
     const d = result.aether != null && prevAether != null ? result.aether - prevAether : null
     setDelta(d)
     onSave({
-      id:    Date.now(),
-      ts:    new Date().toISOString(),
-      city:  result.city,
-      lat:   atmospheric.reading?.lat ?? null,
-      lon:   atmospheric.reading?.lon ?? null,
+      id:     Date.now(),
+      ts:     new Date().toISOString(),
+      city:   result.city,
+      lat:    atmospheric.reading?.lat ?? null,
+      lon:    atmospheric.reading?.lon ?? null,
       aether: result.aether,
       scores: result.scores,
-      counts: {
-        policeCount: result.policeCount, bskyCount:    result.bskyCount,
-        redditCount: result.redditCount, vegCount:     result.vegCount,
-        aqiVal:      result.aqiVal,      pm25Val:      result.pm25Val,
-        elevationM:  result.elevationM,  emCount:      result.emCount,
+      meta: {
+        kpValue:    result.kpValue,
+        aqiVal:     result.aqiVal,
+        pm25Val:    result.pm25Val,
+        elevationM: result.elevationM,
       },
     })
   }, [status, result]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -69,16 +69,20 @@ export default function AetherScoreCard({ atmospheric, kinetic, acoustic, onSave
       {result && (
         <>
           <div className="score-breakdown">
-            <ScoreGauge label={SCORE_LABELS.police}   value={result.scores.police}   status={result.sources?.police?.status}   detail={result.policeCount  != null ? `${result.policeCount} hendelser/24h`   : null} />
-            <ScoreGauge label={SCORE_LABELS.bluesky}  value={result.scores.bluesky}  status={result.sources?.bluesky?.status}  detail={result.bskyCount    != null ? `${result.bskyCount} innlegg/24h`      : null} />
-            <ScoreGauge label={SCORE_LABELS.reddit}   value={result.scores.reddit}   status={result.sources?.reddit?.status}   detail={result.redditCount  != null ? `${result.redditCount} posts/24h`       : null} />
-            <ScoreGauge label={SCORE_LABELS.traffic}  value={result.scores.traffic}  status={result.sources?.traffic?.status}  detail={result.vegCount     != null ? `${result.vegCount} vegarbeid/5 km`    : null} />
-            <ScoreGauge label={SCORE_LABELS.air}      value={result.scores.air}      status={result.sources?.air?.status}      detail={result.aqiVal       != null ? `AQI ${result.aqiVal}${result.pm25Val != null ? ` · PM2.5 ${result.pm25Val.toFixed(1)}` : ''}` : null} />
-            <ScoreGauge label={SCORE_LABELS.elev}     value={result.scores.elev}     status={result.sources?.elev?.status}     detail={result.elevationM   != null ? `${result.elevationM} m asl`            : null} />
-            <ScoreGauge label={SCORE_LABELS.em}       value={result.scores.em}       status={result.sources?.em?.status}       detail={result.emCount      != null ? `${result.emCount} towers/5 km`         : null} />
-            <ScoreGauge label={SCORE_LABELS.kinetic}  value={result.scores.kinetic}  status={result.sources?.kinetic?.status}  detail={kinetic.reading?.dominantHz  != null ? `${kinetic.reading.dominantHz.toFixed(1)} Hz`  : null} />
-            <ScoreGauge label={SCORE_LABELS.acoustic} value={result.scores.acoustic} status={result.sources?.acoustic?.status} detail={acoustic.reading?.dominantHz != null ? `${acoustic.reading.dominantHz.toFixed(1)} Hz` : null} />
+            <ScoreGauge label={SCORE_LABELS.magnetic} value={result.scores.magnetic} status={result.sources?.magnetic?.status} detail={result.sources?.magnetic?.raw ?? null} />
+            <ScoreGauge label={SCORE_LABELS.kp}       value={result.scores.kp}       status={result.sources?.kp?.status}       detail={result.kpValue != null ? `Kp ${result.kpValue.toFixed(1)}` : null} />
+            <ScoreGauge label={SCORE_LABELS.ground}   value={result.scores.ground}   status={result.sources?.ground?.status}   detail={result.sources?.ground?.raw ?? null} />
+            <ScoreGauge label={SCORE_LABELS.air}      value={result.scores.air}      status={result.sources?.air?.status}      detail={result.aqiVal != null ? `AQI ${result.aqiVal}${result.pm25Val != null ? ` · PM2.5 ${result.pm25Val.toFixed(1)}` : ''}` : null} />
+            <ScoreGauge label={SCORE_LABELS.pressure} value={result.scores.pressure} status={result.sources?.pressure?.status} detail={result.sources?.pressure?.raw ?? null} />
           </div>
+          {(result.scores.acoustic != null || result.scores.elev != null) && (
+            <div style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)', margin: '0.25rem 0 0', lineHeight: 1.5 }}>
+              Context (unscored):{' '}
+              {result.scores.acoustic != null && `${result.scores.acoustic} dB acoustic`}
+              {result.scores.acoustic != null && result.scores.elev != null && ' · '}
+              {result.scores.elev != null && `${result.elevationM} m asl`}
+            </div>
+          )}
 
           <button className="sources-toggle" onClick={() => setShowSources(p => !p)}>
             Data Sources {showSources ? '▴' : '▾'}

@@ -1,52 +1,57 @@
 import SensorRing from './SensorRing.jsx'
-import ZoneEnergyBars from './ZoneEnergyBars.jsx'
-import ZoneVerdict from './ZoneVerdict.jsx'
-import { KINETIC_REST_MS } from '../utils/constants.js'
+import { GROUND_ZONES } from '../utils/constants.js'
 
 export default function KineticCard({ sensor }) {
-  const { status, reading, restSecondsLeft, start, stop } = sensor
-  const isActive = status === 'active' || status === 'resting'
+  const { status, reading, start, stop } = sensor
+  const isActive = status === 'active'
+  const zone = reading?.zone ?? null
+  const zInfo = zone ? GROUND_ZONES[zone] : null
 
   return (
     <div className="card card-kinetic">
       <div className="channel-header">
-        <SensorRing
-          status={status}
-          color="#a78bfa"
-          restSecondsLeft={restSecondsLeft}
-          restTotalSeconds={KINETIC_REST_MS / 1000}
-        />
+        <SensorRing status={status} color="#a78bfa" />
         <div className="channel-label">
-          <div className="channel-title">Ground Signal</div>
+          <div className="channel-title">Ground Activity</div>
           <div className="channel-subtitle">
-            {status === 'active' && !reading?.energies ? 'Collecting samples…' :
-             status === 'resting' ? `Next burst in ${restSecondsLeft} s` :
+            {status === 'active' && !reading ? 'Collecting samples…' :
              status === 'pending' ? 'Requesting permission…' :
              status === 'denied'  ? 'Motion access denied' :
              status === 'error'   ? 'Unavailable on this device' :
-             'Low-frequency vibration · 0–20 Hz'}
+             'Structural vibration · 5–20 Hz'}
           </div>
         </div>
-        {reading?.magnitudeRms && (
+        {reading?.magnitudeRms != null && (
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.68rem', color: 'var(--color-text-muted)' }}>
-            {reading.magnitudeRms} rms
+            {typeof reading.magnitudeRms === 'number'
+              ? reading.magnitudeRms.toFixed(3)
+              : reading.magnitudeRms} rms
           </span>
         )}
       </div>
 
       {!isActive && status !== 'denied' && status !== 'error' && (
-        <p className="protocol-hint">Place phone flat on concrete or stone · silence · allow 60 s</p>
+        <p className="protocol-hint">Place phone flat on a surface · keep still</p>
       )}
 
-      {reading?.energies && <ZoneEnergyBars energies={reading.energies} />}
-      <ZoneVerdict zone={reading?.zone} dominantHz={reading?.dominantHz} />
+      {zInfo && (
+        <div className="zone-verdict" style={{ background: zInfo.bg, borderColor: zInfo.border, boxShadow: `0 0 12px ${zInfo.border}` }}>
+          <div className="zone-verdict-top">
+            <span className="zone-verdict-name" style={{ color: zInfo.color }}>{zInfo.label}</span>
+            {reading?.dominantHz != null && (
+              <span className="zone-verdict-hz">{reading.dominantHz.toFixed(2)} Hz</span>
+            )}
+          </div>
+          <p className="zone-verdict-desc">{zInfo.desc}</p>
+        </div>
+      )}
 
       <button
         className={`sensor-btn ${isActive ? 'btn-kinetic-stop' : 'btn-kinetic-start'}`}
         onClick={isActive ? stop : start}
         disabled={status === 'pending' || status === 'error'}
       >
-        {isActive ? 'Stop Scan' : status === 'pending' ? 'Requesting…' : status === 'error' ? 'Unavailable' : 'Start Scan'}
+        {isActive ? 'Stop' : status === 'pending' ? 'Requesting…' : status === 'error' ? 'Unavailable' : 'Start Scan'}
       </button>
 
       {status === 'denied' && (

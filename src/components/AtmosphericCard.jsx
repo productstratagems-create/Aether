@@ -1,6 +1,19 @@
 import SensorRing from './SensorRing.jsx'
+import { lunarPhase } from '../utils/lunar.js'
+
+const PHASE_ICON = {
+  'New Moon':        '🌑',
+  'Waxing Crescent': '🌒',
+  'First Quarter':   '🌓',
+  'Waxing Gibbous':  '🌔',
+  'Full Moon':       '🌕',
+  'Waning Gibbous':  '🌖',
+  'Last Quarter':    '🌗',
+  'Waning Crescent': '🌘',
+}
 
 export default function AtmosphericCard({ sensor, tier }) {
+  const lunar = lunarPhase()
   const { status, reading, sample } = sensor
 
   return (
@@ -40,7 +53,7 @@ export default function AtmosphericCard({ sensor, tier }) {
       {reading && (
         <div>
           {reading.deltaP && (
-            <div className="atm-meta">ΔP {reading.deltaP} hPa · Freshness / Vitality</div>
+            <div className="atm-meta">ΔP {reading.deltaP} hPa</div>
           )}
           {reading.elevationM != null && (
             <div className="atm-meta">{reading.elevationM} m asl</div>
@@ -48,6 +61,11 @@ export default function AtmosphericCard({ sensor, tier }) {
           <div className="atm-meta">{reading.lat}°N, {reading.lon}°E</div>
         </div>
       )}
+
+      <div className="atm-meta" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: reading ? '0.1rem' : '0.5rem', color: 'var(--color-text-muted)' }}>
+        <span style={{ fontSize: '1rem' }}>{PHASE_ICON[lunar.name] ?? '🌙'}</span>
+        <span>{lunar.name} · {lunar.illumination}% illuminated</span>
+      </div>
 
       <button
         className="sensor-btn btn-atmospheric"

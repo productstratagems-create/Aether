@@ -1,22 +1,36 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { computeSpectrum, zoneEnergies } from '../utils/fft.js'
-import {
-  ACOUSTIC_DOWNSAMPLE_HZ, ACOUSTIC_CAPTURE_MS,
-  ACOUSTIC_REST_MS, ACOUSTIC_FFT_SIZE,
-} from '../utils/constants.js'
+
+// Continuous dB SPL metering — not infrasound FFT.
+// Phone MEMS microphones accurately respond to 20 Hz – 20 kHz.
+// We measure RMS of raw audio and convert to approximate dB SPL.
+
+const PROCESSOR_SIZE = 4096
+const UPDATE_MS      = 500
+const REFERENCE      = 0.00002  // 20 μPa, threshold of hearing
+
+function rmsToDb(rmsValue) {
+  if (rmsValue < 1e-10) return 0
+  return Math.max(0, Math.round(20 * Math.log10(rmsValue / REFERENCE)))
+}
+
+function dbZone(db) {
+  if (db < 30) return 'silent'
+  if (db < 50) return 'quiet'
+  if (db < 65) return 'ambient'
+  if (db < 80) return 'noisy'
+  return 'loud'
+}
 
 export function useAcousticSensor() {
-  const [status, setStatus]               = useState('idle')
-  const [reading, setReading]             = useState(null)
-  const [restSecondsLeft, setRestSeconds] = useState(0)
+  const [status, setStatus]   = useState('idle')
+  const [reading, setReading] = useState(null)
 
   const activeRef    = useRef(false)
   const streamRef    = useRef(null)
   const ctxRef       = useRef(null)
   const processorRef = useRef(null)
-  const bufferRef    = useRef([])
   const timerRef     = useRef(null)
-  const countdownRef = useRef(null)
+  const rmsBufferRef = useRef([])
 
   const closeAudio = useCallback(() => {
     try { processorRef.current?.disconnect() } catch { /* */ }
@@ -27,12 +41,9 @@ export function useAcousticSensor() {
     ctxRef.current = null
   }, [])
 
-  const runCycleRef = useRef(null)
-  runCycleRef.current = () => {
-    if (!activeRef.current) return
-
+  const start = useCallback(() => {
+    activeRef.current = true
     setStatus('listening')
-    bufferRef.current = []
 
     navigator.mediaDevices
       .getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } })
@@ -49,52 +60,35 @@ export function useAcousticSensor() {
           if (!activeRef.current) { closeAudio(); return }
 
           const source = ctx.createMediaStreamSource(stream)
-          const proc   = ctx.createScriptProcessor(4096, 1, 1)
+          const proc   = ctx.createScriptProcessor(PROCESSOR_SIZE, 1, 1)
           processorRef.current = proc
-          const ratio  = Math.round(ctx.sampleRate / ACOUSTIC_DOWNSAMPLE_HZ)
 
           proc.onaudioprocess = (e) => {
             if (!activeRef.current) return
             const data = e.inputBuffer.getChannelData(0)
             e.outputBuffer.getChannelData(0).fill(0)
-            for (let i = 0; i < data.length; i += ratio) {
-              let s = 0, c = 0
-              for (let j = i; j < Math.min(i + ratio, data.length); j++) { s += data[j]; c++ }
-              bufferRef.current.push(s / c)
+
+            // Compute RMS of this frame
+            let sum = 0
+            for (let i = 0; i < data.length; i++) sum += data[i] * data[i]
+            const frameRms = Math.sqrt(sum / data.length)
+            rmsBufferRef.current.push(frameRms)
+            // Keep ~1s of frames
+            if (rmsBufferRef.current.length > Math.ceil(1000 / (PROCESSOR_SIZE / ctx.sampleRate * 1000))) {
+              rmsBufferRef.current.shift()
             }
           }
 
-          // connecting to destination is required for onaudioprocess to fire on iOS
           source.connect(proc)
           proc.connect(ctx.destination)
 
-          timerRef.current = setTimeout(() => {
-            if (!activeRef.current) return
-            const raw = bufferRef.current.slice(-ACOUSTIC_FFT_SIZE)
-            closeAudio()
-
-            if (raw.length >= ACOUSTIC_FFT_SIZE / 2) {
-              const samples = raw.length < ACOUSTIC_FFT_SIZE
-                ? Float32Array.from({ length: ACOUSTIC_FFT_SIZE }, (_, i) => raw[i] ?? 0)
-                : raw
-              const spec = computeSpectrum(samples, ACOUSTIC_DOWNSAMPLE_HZ)
-              setReading({ dominantHz: spec.dominantHz, zone: spec.zone, energies: zoneEnergies(spec.bins) })
-            }
-
-            setStatus('resting')
-            let left = Math.round(ACOUSTIC_REST_MS / 1000)
-            setRestSeconds(left)
-            clearInterval(countdownRef.current)
-            countdownRef.current = setInterval(() => {
-              left = Math.max(0, left - 1)
-              setRestSeconds(left)
-            }, 1000)
-
-            timerRef.current = setTimeout(() => {
-              clearInterval(countdownRef.current)
-              runCycleRef.current?.()
-            }, ACOUSTIC_REST_MS)
-          }, ACOUSTIC_CAPTURE_MS)
+          // Update reading at regular interval
+          timerRef.current = setInterval(() => {
+            if (!activeRef.current || rmsBufferRef.current.length === 0) return
+            const avgRms = rmsBufferRef.current.reduce((a, b) => a + b, 0) / rmsBufferRef.current.length
+            const db = rmsToDb(avgRms)
+            setReading({ db, zone: dbZone(db) })
+          }, UPDATE_MS)
         })
       })
       .catch(err => {
@@ -103,30 +97,22 @@ export function useAcousticSensor() {
         setStatus(denied ? 'denied' : 'error')
         activeRef.current = false
       })
-  }
-
-  const start = useCallback(() => {
-    activeRef.current = true
-    runCycleRef.current?.()
-  }, [])
+  }, [closeAudio])
 
   const stop = useCallback(() => {
     activeRef.current = false
-    clearTimeout(timerRef.current)
-    clearInterval(countdownRef.current)
+    clearInterval(timerRef.current)
     closeAudio()
-    bufferRef.current = []
+    rmsBufferRef.current = []
     setStatus('idle')
     setReading(null)
-    setRestSeconds(0)
   }, [closeAudio])
 
   useEffect(() => () => {
     activeRef.current = false
-    clearTimeout(timerRef.current)
-    clearInterval(countdownRef.current)
+    clearInterval(timerRef.current)
     closeAudio()
   }, [closeAudio])
 
-  return { status, reading, restSecondsLeft, start, stop }
+  return { status, reading, start, stop }
 }
