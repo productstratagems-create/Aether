@@ -27,7 +27,8 @@ export default function AetherScoreCard({ atmospheric, kinetic, acoustic, magnet
     onSave({
       id:     Date.now(),
       ts:     new Date().toISOString(),
-      city:   result.city,
+      city:        result.city,
+      featureName: result.featureName ?? null,
       lat:    atmospheric.reading?.lat ?? null,
       lon:    atmospheric.reading?.lon ?? null,
       aether: result.aether,
@@ -54,6 +55,9 @@ export default function AetherScoreCard({ atmospheric, kinetic, acoustic, magnet
         <div className="channel-label">
           <div className="channel-title">Aether Score</div>
           {result?.city && <div className="score-location">{result.city}</div>}
+          {result?.featureName && (
+            <div style={{ fontSize: '0.62rem', color: 'var(--color-text-muted)', marginTop: '0.1rem' }}>{result.featureName}</div>
+          )}
         </div>
         {isComputing && (
           <svg width="20" height="20" viewBox="0 0 20 20" style={{ animation: 'spin-slow 1s linear infinite', color: 'var(--color-score)', opacity: 0.7 }}>

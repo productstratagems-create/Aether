@@ -18,27 +18,32 @@ export function useLocationScore() {
     const sources = {}
 
     // ── Reverse geocoding ──────────────────────────────────────────────────────
-    let city = 'Unknown'
+    // zoom=14 → district/neighbourhood level: stable across ~200 m of GPS drift,
+    // never resolves to a business name. Compose "District · City" for consistency.
+    let city = 'Unknown', featureName = null
     try {
       const geoRes = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&zoom=18&addressdetails=1`
+        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&zoom=14&addressdetails=1`
       )
       const geo = await geoRes.json()
-      city =
-        geo?.address?.amenity       ??
-        geo?.address?.leisure       ??
-        geo?.address?.tourism       ??
-        geo?.address?.natural       ??
-        geo?.address?.neighbourhood ??
-        geo?.address?.suburb        ??
-        geo?.address?.quarter       ??
-        geo?.address?.city_district ??
-        geo?.address?.city          ??
-        geo?.address?.town          ??
-        geo?.address?.village       ??
-        geo?.address?.county        ??
-        geo?.display_name?.split(',')[0] ??
-        'Unknown'
+      const a = geo?.address ?? {}
+
+      // Stable district-level label (zoom=14 suppresses amenity/building names)
+      const district =
+        a.neighbourhood ?? a.suburb ?? a.quarter ??
+        a.city_district ?? a.borough ?? a.village ?? a.town ?? a.county ?? null
+
+      // Containing city / municipality
+      const municipality = a.city ?? a.town ?? a.village ?? a.county ?? null
+
+      if (district && municipality && district !== municipality) {
+        city = `${district} · ${municipality}`
+      } else {
+        city = district ?? municipality ?? geo?.display_name?.split(',')[0] ?? 'Unknown'
+      }
+
+      // Optional specific feature shown separately (park, cathedral, etc.)
+      featureName = a.amenity ?? a.leisure ?? a.tourism ?? a.natural ?? null
     } catch { /* proceed */ }
 
     // ── Geomagnetic Kp index (NOAA SWPC) ─────────────────────────────────────
@@ -128,7 +133,7 @@ export function useLocationScore() {
     })()
 
     setResult({
-      city, kpValue, aqiVal, pm25Val, elevationM,
+      city, featureName, kpValue, aqiVal, pm25Val, elevationM,
       magVariance, groundRms,
       sources,
       scores: {
