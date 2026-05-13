@@ -11,6 +11,7 @@ const ARCHETYPE_FIELD = {
   'Still':      { primary: '#312e81', secondary: '#1e1b4b', duration: '6s',   text: '#a5b4fc' },
   'Charged':    { primary: '#1d4ed8', secondary: '#93c5fd', duration: '1.5s', text: '#bfdbfe' },
   'Radiant':    { primary: '#92400e', secondary: '#d97706', duration: '4.5s', text: '#fef3c7' },
+  'Ancient':    { primary: '#1c1917', secondary: '#292524', duration: '10s',  text: '#d6d3d1' },
   'Incoming':   { primary: '#374151', secondary: '#78350f', duration: '3s',   text: '#d1d5db' },
   'Tidal':      { primary: '#1e3a5f', secondary: '#3730a3', duration: '8s',   text: '#c7d2fe' },
   'Grounded':   { primary: '#3b1f0a', secondary: '#92400e', duration: '2.5s', text: '#fcd34d' },

@@ -63,6 +63,26 @@ export function luminanceScore(luminance, colorTemp) {
   return Math.min(95, Math.max(20, base + bonus))
 }
 
+export function geologicStabilityScore(ageMa) {
+  if (ageMa == null) return null
+  const ma = parseFloat(ageMa)
+  if (ma >= 2500) return 90  // Archean — ancient, stable basement
+  if (ma >= 541)  return 80  // Proterozoic
+  if (ma >= 252)  return 68  // Paleozoic
+  if (ma >= 66)   return 55  // Mesozoic
+  if (ma >= 2.6)  return 44  // Neogene/Paleogene
+  return 32                   // Quaternary — young, often unconsolidated
+}
+
+export function seismicActivityScore(countM3Plus) {
+  if (countM3Plus == null) return null
+  if (countM3Plus === 0)   return 90
+  if (countM3Plus <= 2)    return 68
+  if (countM3Plus <= 6)    return 48
+  if (countM3Plus <= 15)   return 30
+  return 18
+}
+
 export function elevationScore(meters) {
   if (meters == null) return null
   return Math.min(95, Math.round(25 + Math.sqrt(Math.max(0, meters)) * 1.6))

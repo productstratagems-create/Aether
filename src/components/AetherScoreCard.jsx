@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { SCORE_LABELS } from '../utils/constants.js'
+import { SCORE_LABELS, ROCK_CLASSES } from '../utils/constants.js'
 import RadialGauge from './RadialGauge.jsx'
 import ScoreSparkline from './ScoreSparkline.jsx'
 import ScoreGauge from './ScoreGauge.jsx'
@@ -60,6 +60,13 @@ export default function AetherScoreCard({
           {scoreResult?.featureName && (
             <div style={{ fontSize: '0.62rem', color: 'var(--color-text-muted)', marginTop: '0.1rem' }}>{scoreResult.featureName}</div>
           )}
+          {scoreResult?.geology && (
+            <div style={{ fontSize: '0.62rem', color: 'var(--color-text-muted)', marginTop: '0.1rem' }}>
+              {scoreResult.geology.unitName}
+              {scoreResult.geology.ageMa ? ` · ${Math.round(scoreResult.geology.ageMa)} Ma` : ''}
+              {scoreResult.geology.rockClass && ` · ${ROCK_CLASSES[scoreResult.geology.rockClass]?.label ?? scoreResult.geology.rockClass}`}
+            </div>
+          )}
         </div>
         {isComputing && (
           <svg width="20" height="20" viewBox="0 0 20 20" style={{ animation: 'spin-slow 1s linear infinite', color: 'var(--color-score)', opacity: 0.7 }}>
@@ -82,6 +89,8 @@ export default function AetherScoreCard({
             <ScoreGauge label={SCORE_LABELS.pressure}  value={scoreResult.scores.pressure}  status={scoreResult.sources?.pressure?.status}  detail={scoreResult.sources?.pressure?.raw ?? null} />
             <ScoreGauge label={SCORE_LABELS.acoustic}  value={scoreResult.scores.acoustic}  status={scoreResult.sources?.acoustic?.status}  detail={scoreResult.sources?.acoustic?.raw ?? null} />
             <ScoreGauge label={SCORE_LABELS.luminance} value={scoreResult.scores.luminance} status={scoreResult.sources?.luminance?.status} detail={scoreResult.sources?.luminance?.raw ?? null} />
+            <ScoreGauge label={SCORE_LABELS.geology}   value={scoreResult.scores.geology}   status={scoreResult.sources?.geology?.status}   detail={scoreResult.sources?.geology?.raw   ?? null} />
+            <ScoreGauge label={SCORE_LABELS.seismic}   value={scoreResult.scores.seismic}   status={scoreResult.sources?.seismic?.status}   detail={scoreResult.sources?.seismic?.raw   ?? null} />
           </div>
           {scoreResult.scores.elev != null && (
             <div style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)', margin: '0.25rem 0 0' }}>

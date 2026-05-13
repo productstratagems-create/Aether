@@ -2,7 +2,8 @@ import { useState, useCallback } from 'react'
 import {
   magneticStabilityScore, kpScore, groundCalmScore,
   airQualityScore, pressureStabilityScore, elevationScore,
-  acousticCalmScore, luminanceScore, compositeAether,
+  acousticCalmScore, luminanceScore, geologicStabilityScore,
+  seismicActivityScore, compositeAether,
 } from '../utils/scores.js'
 
 // Five physically-grounded scoring factors:
@@ -118,23 +119,77 @@ export function useLocationScore() {
       ? { status: 'ok',      latencyMs: null, raw: `${Math.round(lumLuminance * 100)}% lum · ${lumColorTemp}` }
       : { status: 'skipped', latencyMs: null, raw: null }
 
+    // ── Geological substrate (Macrostrat) ────────────────────────────────────
+    let geoUnit = null, geoAgeMa = null, geoScoreVal = null, rockClass = null
+    {
+      const t0 = Date.now()
+      try {
+        const res  = await fetch(
+          `https://macrostrat.org/api/v2/geologic_units/map?lat=${lat}&lng=${lon}&format=json`
+        )
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const unit = (await res.json())?.success?.data?.[0] ?? null
+        if (unit) {
+          geoUnit     = unit.unit_name ?? null
+          geoAgeMa    = parseFloat(unit.b_age ?? 0) || null
+          geoScoreVal = geologicStabilityScore(geoAgeMa)
+          const lith  = (unit.lith ?? '').toLowerCase()
+          rockClass   = lith.match(/igneous|volcanic|plutonic|basalt|granite/) ? 'igneous'
+                      : lith.match(/metamorphic|gneiss|schist|quartzite/)      ? 'metamorphic'
+                      : lith.match(/sediment|limestone|sandstone|shale/)       ? 'sedimentary'
+                      : 'unknown'
+        }
+        sources.geology = { status: 'ok', latencyMs: Date.now() - t0,
+          raw: geoUnit ? `${geoUnit} · ${geoAgeMa} Ma` : '—' }
+      } catch {
+        sources.geology = { status: 'error', latencyMs: Date.now() - t0, raw: null }
+      }
+    }
+
+    // ── Regional seismicity (USGS) ────────────────────────────────────────────
+    let seismicCount = null, seismicMaxMag = null, seismicScoreVal = null
+    {
+      const t0    = Date.now()
+      const since = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0]
+      try {
+        const res    = await fetch(
+          `https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson` +
+          `&latitude=${lat}&longitude=${lon}&maxradiuskm=150` +
+          `&minmagnitude=3.0&starttime=${since}&orderby=magnitude`
+        )
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const quakes  = (await res.json())?.features ?? []
+        seismicCount   = quakes.length
+        seismicMaxMag  = quakes[0]?.properties?.mag ?? null
+        seismicScoreVal = seismicActivityScore(seismicCount)
+        sources.seismic = { status: 'ok', latencyMs: Date.now() - t0,
+          raw: seismicCount === 0
+            ? 'No M3+ activity · 7d · 150km'
+            : `${seismicCount} event${seismicCount > 1 ? 's' : ''} · max M${seismicMaxMag?.toFixed(1)}` }
+      } catch {
+        sources.seismic = { status: 'error', latencyMs: Date.now() - t0, raw: null }
+      }
+    }
+
     // ── Elevation ─────────────────────────────────────────────────────────────
     const elevScore    = elevationScore(elevationM)
     sources.elev = elevationM != null
       ? { status: 'ok', latencyMs: null, raw: `${elevationM} m asl` }
       : { status: 'skipped', latencyMs: null, raw: null }
 
-    // ── Composite (weighted) ──────────────────────────────────────────────────
-    // Weights: magnetic 20%, Kp 16%, ground 16%, air 16%, pressure 11%, acoustic 11%, luminance 10%
+    // ── Composite (weighted, auto-renormalise on null) ────────────────────────
+    // Weights: mag 17%, geo 12%, kp/ground/air 13/13/12%, pressure/acoustic 9/9%, seismic 8%, lum 7%
     const weightedAether = (() => {
       const factors = [
-        { score: magScoreVal,  weight: 0.20 },
-        { score: kpScoreVal,   weight: 0.16 },
-        { score: groundScore,  weight: 0.16 },
-        { score: airScoreVal,  weight: 0.16 },
-        { score: pressScore,   weight: 0.11 },
-        { score: acScoreVal,   weight: 0.11 },
-        { score: lumScoreVal,  weight: 0.10 },
+        { score: magScoreVal,     weight: 0.17 },
+        { score: kpScoreVal,      weight: 0.13 },
+        { score: groundScore,     weight: 0.13 },
+        { score: airScoreVal,     weight: 0.12 },
+        { score: pressScore,      weight: 0.09 },
+        { score: acScoreVal,      weight: 0.09 },
+        { score: lumScoreVal,     weight: 0.07 },
+        { score: geoScoreVal,     weight: 0.12 },
+        { score: seismicScoreVal, weight: 0.08 },
       ]
       const available = factors.filter(f => f.score != null)
       if (!available.length) return null
@@ -144,7 +199,13 @@ export function useLocationScore() {
 
     setResult({
       city, featureName, kpValue, aqiVal, pm25Val, elevationM,
-      magVariance, groundRms,
+      magVariance, groundRms, seismicCount, seismicMaxMag,
+      geology: geoUnit != null ? {
+        unitName: geoUnit,
+        ageMa:    geoAgeMa,
+        ageGa:    geoAgeMa != null ? geoAgeMa / 1000 : null,
+        rockClass,
+      } : null,
       sources,
       scores: {
         magnetic:  magScoreVal,
@@ -154,6 +215,8 @@ export function useLocationScore() {
         pressure:  pressScore,
         acoustic:  acScoreVal,
         luminance: lumScoreVal,
+        geology:   geoScoreVal,
+        seismic:   seismicScoreVal,
         elev:      elevScore,
       },
       aether: weightedAether,

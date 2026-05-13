@@ -31,10 +31,20 @@ export default function App() {
   const { status: scoreStatus, result: scoreResult, compute: scoreCompute } = useLocationScore()
   const { history, save, remove, clear } = useLocationHistory()
 
-  // Raw archetype recomputed whenever any sensor reading or Kp changes
+  // Geological context derived from last score compute — persists between sensor updates
+  const geoReading = useMemo(() => {
+    if (!scoreResult) return null
+    return {
+      ageGa:        scoreResult.geology?.ageGa    ?? null,
+      rockClass:    scoreResult.geology?.rockClass ?? null,
+      seismicCount: scoreResult.seismicCount       ?? null,
+    }
+  }, [scoreResult])
+
+  // Raw archetype recomputed whenever any sensor reading, Kp, or geo context changes
   const { a: atmosphericTier, archetype: rawArchetype } = useMemo(
-    () => classify(kinetic.reading, null, atmospheric.reading, acoustic.reading, magnetometer.reading, kp, TODAY_LUNAR, luminance.reading),
-    [kinetic.reading, atmospheric.reading, acoustic.reading, magnetometer.reading, kp, luminance.reading]
+    () => classify(kinetic.reading, null, atmospheric.reading, acoustic.reading, magnetometer.reading, kp, TODAY_LUNAR, luminance.reading, geoReading),
+    [kinetic.reading, atmospheric.reading, acoustic.reading, magnetometer.reading, kp, luminance.reading, geoReading]
   )
 
   // Stable archetype: commit only after 5 seconds of consistent raw classification
