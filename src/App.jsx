@@ -5,22 +5,26 @@ import { useKineticSensor }       from './hooks/useKineticSensor.js'
 import { useAcousticSensor }      from './hooks/useAcousticSensor.js'
 import { useAtmosphericSensor }   from './hooks/useAtmosphericSensor.js'
 import { useMagnetometerSensor }  from './hooks/useMagnetometerSensor.js'
+import { useLocationScore }       from './hooks/useLocationScore.js'
 import { useLocationHistory }     from './hooks/useLocationHistory.js'
-import TabBar   from './components/TabBar.jsx'
-import ScanView  from './views/ScanView.jsx'
-import ScoreView from './views/ScoreView.jsx'
-import MapView   from './views/MapView.jsx'
-import LogView   from './views/LogView.jsx'
+import TabBar        from './components/TabBar.jsx'
+import InstrumentView from './views/InstrumentView.jsx'
+import ScanView      from './views/ScanView.jsx'
+import ScoreView     from './views/ScoreView.jsx'
+import MapView       from './views/MapView.jsx'
+import LogView       from './views/LogView.jsx'
 
 const TODAY_LUNAR = lunarPhase()
 
 export default function App() {
-  const [tab, setTab] = useState('scan')
+  const [expertMode, setExpertMode] = useState(false)
+  const [tab, setTab]               = useState('scan')
 
   const kinetic      = useKineticSensor()
   const acoustic     = useAcousticSensor()
   const atmospheric  = useAtmosphericSensor()
   const magnetometer = useMagnetometerSensor()
+  const { status: scoreStatus, result: scoreResult, compute: scoreCompute } = useLocationScore()
   const { history, save, remove, clear } = useLocationHistory()
 
   const { a: atmosphericTier, archetype } = useMemo(
@@ -28,11 +32,14 @@ export default function App() {
     [kinetic.reading, atmospheric.reading, acoustic.reading, magnetometer.reading]
   )
 
+  // Expose tier on atmospheric object for InstrumentView
+  const atmosphericWithTier = { ...atmospheric, tier: atmosphericTier }
+
   const sensorActive =
     kinetic.status === 'active' ||
     acoustic.status === 'listening'
 
-  const latestScore = history[0]?.aether ?? null
+  const latestScore = scoreResult?.aether ?? history[0]?.aether ?? null
 
   const badges = {
     scan:  sensorActive ? 'pulse' : undefined,
@@ -40,8 +47,36 @@ export default function App() {
     log:   history.length > 0 ? history.length : undefined,
   }
 
+  if (!expertMode) {
+    return (
+      <div className="app-shell">
+        <div className="app-view">
+          <InstrumentView
+            kinetic={kinetic}
+            acoustic={acoustic}
+            atmospheric={atmosphericWithTier}
+            magnetometer={magnetometer}
+            archetype={archetype}
+            scoreStatus={scoreStatus}
+            scoreResult={scoreResult}
+            scoreCompute={scoreCompute}
+            onExpert={() => setExpertMode(true)}
+          />
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="app-shell">
+      {/* Expert mode back button */}
+      <div className="expert-header">
+        <button className="expert-back-btn" onClick={() => setExpertMode(false)}>
+          ← Instrument
+        </button>
+        <span className="expert-header-title">Expert View</span>
+      </div>
+
       <div className={`app-view${tab === 'map' ? ' app-view--flush' : ''}`}>
         {tab === 'scan' && (
           <ScanView
@@ -59,6 +94,9 @@ export default function App() {
             atmospheric={atmospheric}
             magnetometer={magnetometer}
             archetype={archetype}
+            scoreStatus={scoreStatus}
+            scoreResult={scoreResult}
+            scoreCompute={scoreCompute}
             onSave={save}
             history={history}
           />

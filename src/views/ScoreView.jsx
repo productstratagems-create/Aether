@@ -1,7 +1,7 @@
 import ArchetypeBanner from '../components/ArchetypeBanner.jsx'
 import AetherScoreCard from '../components/AetherScoreCard.jsx'
 
-export default function ScoreView({ kinetic, acoustic, atmospheric, magnetometer, archetype, onSave, history }) {
+export default function ScoreView({ kinetic, acoustic, atmospheric, magnetometer, archetype, scoreStatus, scoreResult, scoreCompute, onSave, history }) {
   return (
     <div className="view-enter" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', padding: '1.25rem 1rem 1rem' }}>
       {archetype && <ArchetypeBanner archetype={archetype} />}
@@ -10,6 +10,9 @@ export default function ScoreView({ kinetic, acoustic, atmospheric, magnetometer
         kinetic={kinetic}
         acoustic={acoustic}
         magnetometer={magnetometer}
+        scoreStatus={scoreStatus}
+        scoreResult={scoreResult}
+        scoreCompute={scoreCompute}
         onSave={onSave}
         history={history}
       />
