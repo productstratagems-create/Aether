@@ -41,6 +41,15 @@ const ARCHETYPES = [
       (pressureTrend === 'stable' || pressureTrend == null),
   },
   {
+    name: 'Radiant',
+    description: 'Natural light is flooding this space — open sky, solar energy, the field fully illuminated.',
+    sensation: 'Luminosity',
+    match: ({ groundZone, lightZone, kp }) =>
+      (lightZone === 'full' || lightZone === 'bright') &&
+      groundZone === 'calm' &&
+      (kp == null || kp <= 3),
+  },
+  {
     name: 'Incoming',
     description: 'Barometric pressure is falling. The atmosphere is reorganising ahead of a system.',
     sensation: 'Anticipation',
@@ -92,18 +101,20 @@ const ARCHETYPES = [
 
 // ─── Main classifier ──────────────────────────────────────────────────────────
 
-export function classify(kineticReading, _unused, atmosphericReading, acousticReading, magnetometerReading, kp, lunarPhase) {
+export function classify(kineticReading, _unused, atmosphericReading, acousticReading, magnetometerReading, kp, lunarPhase, luminanceReading) {
   const a = atmosphericReading
     ? atmosphericTier(atmosphericReading.pressureHpa, atmosphericReading.deltaP)
     : null
 
   const ctx = {
-    groundZone:    kineticReading?.zone        ?? null,
-    acousticZone:  acousticReading?.zone       ?? null,
+    groundZone:    kineticReading?.zone           ?? null,
+    acousticZone:  acousticReading?.zone          ?? null,
     magStability:  magnetometerReading?.stability ?? null,
     kp:            kp ?? null,
-    pressureTrend: a?.trend                    ?? null,
-    lunarPhase:    lunarPhase                  ?? null,
+    pressureTrend: a?.trend                       ?? null,
+    lunarPhase:    lunarPhase                     ?? null,
+    lightZone:     luminanceReading?.zone         ?? null,
+    colorTemp:     luminanceReading?.colorTemp    ?? null,
     kineticReading,
     magnetometerReading,
   }

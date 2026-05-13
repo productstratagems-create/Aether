@@ -8,6 +8,7 @@ import { useMagnetometerSensor }  from './hooks/useMagnetometerSensor.js'
 import { useLocationScore }       from './hooks/useLocationScore.js'
 import { useLocationHistory }     from './hooks/useLocationHistory.js'
 import { useKpIndex }             from './hooks/useKpIndex.js'
+import { useLuminanceSensor }     from './hooks/useLuminanceSensor.js'
 import TabBar        from './components/TabBar.jsx'
 import InstrumentView from './views/InstrumentView.jsx'
 import ScanView      from './views/ScanView.jsx'
@@ -25,14 +26,15 @@ export default function App() {
   const acoustic     = useAcousticSensor()
   const atmospheric  = useAtmosphericSensor()
   const magnetometer = useMagnetometerSensor()
+  const luminance    = useLuminanceSensor()
   const kp           = useKpIndex()
   const { status: scoreStatus, result: scoreResult, compute: scoreCompute } = useLocationScore()
   const { history, save, remove, clear } = useLocationHistory()
 
   // Raw archetype recomputed whenever any sensor reading or Kp changes
   const { a: atmosphericTier, archetype: rawArchetype } = useMemo(
-    () => classify(kinetic.reading, null, atmospheric.reading, acoustic.reading, magnetometer.reading, kp, TODAY_LUNAR),
-    [kinetic.reading, atmospheric.reading, acoustic.reading, magnetometer.reading, kp]
+    () => classify(kinetic.reading, null, atmospheric.reading, acoustic.reading, magnetometer.reading, kp, TODAY_LUNAR, luminance.reading),
+    [kinetic.reading, atmospheric.reading, acoustic.reading, magnetometer.reading, kp, luminance.reading]
   )
 
   // Stable archetype: commit only after 5 seconds of consistent raw classification
@@ -79,6 +81,7 @@ export default function App() {
             acoustic={acoustic}
             atmospheric={atmosphericWithTier}
             magnetometer={magnetometer}
+            luminance={luminance}
             archetype={archetype}
             scoreStatus={scoreStatus}
             scoreResult={scoreResult}
@@ -108,6 +111,7 @@ export default function App() {
             atmospheric={atmospheric}
             atmosphericTier={atmosphericTier}
             magnetometer={magnetometer}
+            luminance={luminance}
           />
         )}
         {tab === 'score' && (
@@ -116,6 +120,7 @@ export default function App() {
             acoustic={acoustic}
             atmospheric={atmospheric}
             magnetometer={magnetometer}
+            luminance={luminance}
             archetype={archetype}
             scoreStatus={scoreStatus}
             scoreResult={scoreResult}
