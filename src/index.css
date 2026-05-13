@@ -1030,13 +1030,31 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   animation: fade-up 0.25s ease both;
 }
 
+/* ── Ambient field background ─────────────────────────────────────────── */
+.field-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background:
+    radial-gradient(ellipse at 30% 35%, var(--field-primary, #0f0f1a) 0%, transparent 60%),
+    radial-gradient(ellipse at 72% 65%, var(--field-secondary, #1d2b50) 0%, transparent 55%),
+    var(--color-bg);
+  animation: field-breathe var(--field-duration, 7s) ease-in-out infinite alternate;
+  transition: background 2s ease;
+}
+
+@keyframes field-breathe {
+  from { opacity: 0.65; transform: scale(1); }
+  to   { opacity: 1;    transform: scale(1.05); }
+}
+
 /* ── Instrument view ──────────────────────────────────────────────────── */
 .instrument-view {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   height: 100%;
-  overflow-y: auto;
-  overscroll-behavior-y: contain;
 }
 
 .instrument-header {
@@ -1050,8 +1068,8 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .instrument-expert-btn {
   background: none;
-  border: 1px solid rgba(255 255 255 / 0.1);
-  color: var(--color-text-dim);
+  border: 1px solid rgba(255 255 255 / 0.08);
+  color: rgba(255 255 255 / 0.2);
   width: 34px;
   height: 34px;
   border-radius: 8px;
@@ -1059,137 +1077,102 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  transition: color 0.15s, border-color 0.15s;
+  transition: color 0.2s, border-color 0.2s;
 }
 
-.instrument-expert-btn:hover { color: var(--color-text-muted); border-color: rgba(255 255 255 / 0.2); }
+.instrument-expert-btn:hover { color: rgba(255 255 255 / 0.5); border-color: rgba(255 255 255 / 0.2); }
 
 .instrument-location {
   flex: 1;
   text-align: right;
-  font-size: 0.68rem;
-  color: var(--color-text-muted);
+  font-size: 0.65rem;
+  color: rgba(255 255 255 / 0.3);
   font-style: italic;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.instrument-archetype {
-  flex-shrink: 0;
-  text-align: center;
-  padding: 1.25rem 1.5rem 1rem;
-  min-height: 120px;
+/* ── Field center — dominant element ─────────────────────────────────── */
+.field-center {
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.3rem;
+  text-align: center;
+  padding: 2rem;
+  gap: 0.6rem;
 }
 
-.instrument-archetype-name {
-  font-size: 1.55rem;
+.field-name {
+  font-size: 2rem;
   font-weight: 700;
   letter-spacing: 0.01em;
-  color: #a78bfa;
-  line-height: 1.15;
+  line-height: 1.1;
+  transition: color 1.5s ease;
 }
 
-.instrument-archetype-sensation {
-  font-size: 0.78rem;
-  color: var(--color-text-muted);
+.field-sensation {
+  font-size: 0.85rem;
   font-style: italic;
+  color: rgba(255 255 255 / 0.38);
+  letter-spacing: 0.02em;
 }
 
-.instrument-archetype-desc {
-  font-size: 0.72rem;
-  color: var(--color-text-dim);
-  line-height: 1.5;
-  max-width: 28ch;
-  text-align: center;
-  margin-top: 0.2rem;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-/* ── Sensor grid ──────────────────────────────────────────────────────── */
-.sensor-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.75rem;
-  padding: 0 1.25rem;
+/* ── Score action ─────────────────────────────────────────────────────── */
+.field-score-action {
+  padding: 0 1.5rem 0.75rem;
   flex-shrink: 0;
 }
 
-.sensor-orb {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.15rem;
-  padding: 0.75rem 0.5rem 0.65rem;
-  border-radius: var(--radius-md);
-  border: 1.5px solid;
-  transition: box-shadow 0.4s ease, border-color 0.3s ease;
-  min-height: 110px;
-}
-
-.sensor-orb-value {
-  font-size: 0.9rem;
-  font-family: var(--font-mono);
+.field-score-btn {
+  width: 100%;
+  padding: 0.7rem 1.25rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
   font-weight: 700;
-  line-height: 1;
-  transition: color 0.3s;
-}
-
-.sensor-orb-unit {
-  font-size: 0.62rem;
-  font-weight: 400;
-  opacity: 0.7;
-  margin-left: 0.1rem;
-}
-
-.sensor-orb-label {
-  font-size: 0.58rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
-  transition: color 0.3s;
-  line-height: 1;
+  background: rgba(109 40 217 / 0.35);
+  border: 1px solid rgba(109 40 217 / 0.45);
+  color: rgba(255 255 255 / 0.75);
+  min-height: 44px;
+  transition: background 0.2s, opacity 0.15s;
 }
 
-.sensor-orb-channel {
-  font-size: 0.54rem;
-  color: var(--color-text-dim);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  margin-top: 0.1rem;
-}
+.field-score-btn:hover:not(:disabled) { background: rgba(109 40 217 / 0.5); }
+.field-score-btn:disabled { opacity: 0.45; }
 
-/* ── Instrument score row ─────────────────────────────────────────────── */
-.instrument-score-row {
+/* ── Bottom strip ─────────────────────────────────────────────────────── */
+.field-bottom {
   display: flex;
-  align-items: baseline;
-  justify-content: center;
-  gap: 0.5rem;
-  padding: 1.25rem 1.5rem 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.5rem calc(0.75rem + env(safe-area-inset-bottom));
   flex-shrink: 0;
 }
 
-.instrument-score-val {
-  font-size: 3.25rem;
+.sensor-dots {
+  display: flex;
+  gap: 0.55rem;
+  align-items: center;
+}
+
+.sensor-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  transition: background 0.8s ease;
+  display: inline-block;
+}
+
+.field-score-val {
+  font-size: 1.25rem;
   font-weight: 700;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  line-height: 1;
-  transition: color 0.5s ease;
-}
-
-.instrument-score-btn {
-  background: var(--color-score-dark);
-  color: #fff;
+  transition: color 0.6s ease;
 }
 
 /* ── Expert mode header ───────────────────────────────────────────────── */
