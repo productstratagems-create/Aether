@@ -13,7 +13,7 @@ export function useLocationScore() {
   const [status, setStatus] = useState('idle')
   const [result, setResult] = useState(null)
 
-  const compute = useCallback(async (lat, lon, elevationM, kineticReading, acousticReading, magnetometerReading) => {
+  const compute = useCallback(async (lat, lon, elevationM, kineticReading, acousticReading, magnetometerReading, atmosphericReading) => {
     setStatus('computing')
     const sources = {}
 
@@ -97,9 +97,10 @@ export function useLocationScore() {
       : { status: 'skipped', latencyMs: null, raw: null }
 
     // ── Pressure stability (from atmospheric reading) ─────────────────────────
-    const pressScore   = pressureStabilityScore(null)  // deltaP from atmospheric hook
-    sources.pressure = elevationM != null
-      ? { status: 'ok',      latencyMs: null, raw: `${elevationM} m asl` }
+    const deltaP     = atmosphericReading?.deltaP ?? null
+    const pressScore = pressureStabilityScore(deltaP != null ? parseFloat(deltaP) : null)
+    sources.pressure = atmosphericReading?.pressureHpa != null
+      ? { status: 'ok', latencyMs: null, raw: `${atmosphericReading.pressureHpa} hPa${deltaP != null ? ` · Δ${deltaP}` : ''}` }
       : { status: 'skipped', latencyMs: null, raw: null }
 
     // ── Acoustic level (on-device) ────────────────────────────────────────────
@@ -116,15 +117,15 @@ export function useLocationScore() {
       : { status: 'skipped', latencyMs: null, raw: null }
 
     // ── Composite (weighted) ──────────────────────────────────────────────────
-    // Weights: magnetic 25%, Kp 20%, ground 20%, air 20%, pressure 15%
-    // Acoustic and elevation shown as context, not scored (no causal claim)
+    // Weights: magnetic 22%, Kp 18%, ground 18%, air 18%, pressure 12%, acoustic 12%
     const weightedAether = (() => {
       const factors = [
-        { score: magScoreVal,  weight: 0.25 },
-        { score: kpScoreVal,   weight: 0.20 },
-        { score: groundScore,  weight: 0.20 },
-        { score: airScoreVal,  weight: 0.20 },
-        { score: pressScore,   weight: 0.15 },
+        { score: magScoreVal,  weight: 0.22 },
+        { score: kpScoreVal,   weight: 0.18 },
+        { score: groundScore,  weight: 0.18 },
+        { score: airScoreVal,  weight: 0.18 },
+        { score: pressScore,   weight: 0.12 },
+        { score: acScoreVal,   weight: 0.12 },
       ]
       const available = factors.filter(f => f.score != null)
       if (!available.length) return null

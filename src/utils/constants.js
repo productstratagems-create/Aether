@@ -36,13 +36,13 @@ export const GROUND_ZONES = {
   stress: { label: 'Stress',   color: '#f87171', border: '#dc2626', bg: 'rgba(31,10,10,0.6)',   desc: 'Heavy mechanical vibration — construction, heavy traffic, machinery.' },
 }
 
-// Acoustic dB SPL zones
+// Acoustic zones — relative dB above ambient baseline (device-agnostic)
 export const ACOUSTIC_ZONES = {
-  silent:  { label: 'Silent',  color: '#34d399', desc: '< 30 dB — library, deep forest' },
-  quiet:   { label: 'Quiet',   color: '#6ee7b7', desc: '30–50 dB — residential at night' },
-  ambient: { label: 'Ambient', color: '#9ca3af', desc: '50–65 dB — office, light traffic' },
-  noisy:   { label: 'Noisy',   color: '#fbbf24', desc: '65–80 dB — busy street' },
-  loud:    { label: 'Loud',    color: '#f87171', desc: '> 80 dB — construction, crowd' },
+  hush:    { label: 'Hush',    color: '#34d399', desc: '< 3 dB above ambient — near-perfect quiet' },
+  quiet:   { label: 'Quiet',   color: '#6ee7b7', desc: '3–12 dB above ambient — low background activity' },
+  ambient: { label: 'Ambient', color: '#9ca3af', desc: '12–22 dB above ambient — ordinary indoor environment' },
+  active:  { label: 'Active',  color: '#fbbf24', desc: '22–35 dB above ambient — busy street, crowd' },
+  loud:    { label: 'Loud',    color: '#f87171', desc: '≥ 35 dB above ambient — construction, concert, machinery' },
 }
 
 // Magnetic field stability zones

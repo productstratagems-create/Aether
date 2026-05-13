@@ -8,14 +8,14 @@ function scoreColor(s) {
 }
 
 const ARCHETYPE_FIELD = {
-  'Deep Silence':    { primary: '#312e81', secondary: '#1e1b4b', duration: '6s',   text: '#a5b4fc' },
-  'Magnetic Storm':  { primary: '#1d4ed8', secondary: '#93c5fd', duration: '1.5s', text: '#bfdbfe' },
-  'Storm Front':     { primary: '#374151', secondary: '#78350f', duration: '3s',   text: '#d1d5db' },
-  'Lunar Tide':      { primary: '#1e3a5f', secondary: '#3730a3', duration: '8s',   text: '#c7d2fe' },
-  'Trembling Earth': { primary: '#3b1f0a', secondary: '#92400e', duration: '2.5s', text: '#fcd34d' },
-  'Urban Pulse':     { primary: '#7c1d1d', secondary: '#9a3412', duration: '1.8s', text: '#fca5a5' },
-  'Clear Ground':    { primary: '#064e3b', secondary: '#065f46', duration: '5s',   text: '#6ee7b7' },
-  'Shifting Field':  { primary: '#1f1635', secondary: '#374151', duration: '4s',   text: '#9ca3af' },
+  'Still Depth':      { primary: '#312e81', secondary: '#1e1b4b', duration: '6s',   text: '#a5b4fc' },
+  'Fractured Field':  { primary: '#1d4ed8', secondary: '#93c5fd', duration: '1.5s', text: '#bfdbfe' },
+  'Pressure Break':   { primary: '#374151', secondary: '#78350f', duration: '3s',   text: '#d1d5db' },
+  'Lunar Pull':       { primary: '#1e3a5f', secondary: '#3730a3', duration: '8s',   text: '#c7d2fe' },
+  'Live Ground':      { primary: '#3b1f0a', secondary: '#92400e', duration: '2.5s', text: '#fcd34d' },
+  'Dense Field':      { primary: '#7c1d1d', secondary: '#9a3412', duration: '1.8s', text: '#fca5a5' },
+  'Open Channel':     { primary: '#064e3b', secondary: '#065f46', duration: '5s',   text: '#6ee7b7' },
+  'Flux':             { primary: '#1f1635', secondary: '#374151', duration: '4s',   text: '#9ca3af' },
 }
 
 const IDLE_FIELD = { primary: '#0f0f1a', secondary: '#1d2b50', duration: '7s', text: 'var(--color-text-dim)' }
@@ -55,7 +55,7 @@ export default function InstrumentView({
   }, [atmospheric.status, atmospheric.reading]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const triggerCompute = (reading) => {
-    scoreCompute(reading.lat, reading.lon, reading.elevationM, kinetic.reading, acoustic.reading, magnetometer?.reading ?? null)
+    scoreCompute(reading.lat, reading.lon, reading.elevationM, kinetic.reading, acoustic.reading, magnetometer?.reading ?? null, reading)
   }
 
   const isBusy  = pendingScore || atmospheric.status === 'sampling' || scoreStatus === 'computing'
@@ -66,7 +66,7 @@ export default function InstrumentView({
   // Sensor dot activity
   const magActive = magnetometer.status === 'active'
   const gndActive = kinetic.status === 'active'
-  const acActive  = acoustic.status === 'listening'
+  const acActive  = acoustic.status === 'listening' || acoustic.status === 'calibrating'
   const atmActive = atmospheric.status === 'ready' || atmospheric.status === 'sampling'
 
   return (

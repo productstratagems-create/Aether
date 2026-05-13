@@ -17,7 +17,7 @@ export default function AetherScoreCard({
 
   const handleCompute = () => {
     if (!reading) return
-    scoreCompute(reading.lat, reading.lon, reading.elevationM, kinetic.reading, acoustic.reading, magnetometer?.reading ?? null)
+    scoreCompute(reading.lat, reading.lon, reading.elevationM, kinetic.reading, acoustic.reading, magnetometer?.reading ?? null, reading)
   }
 
   useEffect(() => {
@@ -80,13 +80,11 @@ export default function AetherScoreCard({
             <ScoreGauge label={SCORE_LABELS.ground}   value={scoreResult.scores.ground}   status={scoreResult.sources?.ground?.status}   detail={scoreResult.sources?.ground?.raw ?? null} />
             <ScoreGauge label={SCORE_LABELS.air}      value={scoreResult.scores.air}      status={scoreResult.sources?.air?.status}      detail={scoreResult.aqiVal != null ? `AQI ${scoreResult.aqiVal}${scoreResult.pm25Val != null ? ` · PM2.5 ${scoreResult.pm25Val.toFixed(1)}` : ''}` : null} />
             <ScoreGauge label={SCORE_LABELS.pressure} value={scoreResult.scores.pressure} status={scoreResult.sources?.pressure?.status} detail={scoreResult.sources?.pressure?.raw ?? null} />
+            <ScoreGauge label={SCORE_LABELS.acoustic} value={scoreResult.scores.acoustic} status={scoreResult.sources?.acoustic?.status} detail={scoreResult.sources?.acoustic?.raw ?? null} />
           </div>
-          {(scoreResult.scores.acoustic != null || scoreResult.scores.elev != null) && (
-            <div style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)', margin: '0.25rem 0 0', lineHeight: 1.5 }}>
-              Context (unscored):{' '}
-              {scoreResult.scores.acoustic != null && `${scoreResult.scores.acoustic} dB acoustic`}
-              {scoreResult.scores.acoustic != null && scoreResult.scores.elev != null && ' · '}
-              {scoreResult.scores.elev != null && `${scoreResult.elevationM} m asl`}
+          {scoreResult.scores.elev != null && (
+            <div style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)', margin: '0.25rem 0 0' }}>
+              Elevation context: {scoreResult.elevationM} m asl
             </div>
           )}
 
