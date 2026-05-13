@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react'
 import {
   magneticStabilityScore, kpScore, groundCalmScore,
   airQualityScore, pressureStabilityScore, elevationScore,
-  acousticCalmScore, compositeAether,
+  acousticCalmScore, luminanceScore, compositeAether,
 } from '../utils/scores.js'
 
 // Five physically-grounded scoring factors:
@@ -13,7 +13,7 @@ export function useLocationScore() {
   const [status, setStatus] = useState('idle')
   const [result, setResult] = useState(null)
 
-  const compute = useCallback(async (lat, lon, elevationM, kineticReading, acousticReading, magnetometerReading, atmosphericReading) => {
+  const compute = useCallback(async (lat, lon, elevationM, kineticReading, acousticReading, magnetometerReading, atmosphericReading, luminanceReading) => {
     setStatus('computing')
     const sources = {}
 
@@ -110,6 +110,14 @@ export function useLocationScore() {
       ? { status: 'ok',      latencyMs: null, raw: `${acDb ?? '?'} dB · ${acousticReading.zone ?? 'unknown'}` }
       : { status: 'skipped', latencyMs: null, raw: null }
 
+    // ── Luminance (camera-based) ──────────────────────────────────────────────
+    const lumLuminance = luminanceReading?.luminance ?? null
+    const lumColorTemp = luminanceReading?.colorTemp ?? null
+    const lumScoreVal  = luminanceScore(lumLuminance, lumColorTemp)
+    sources.luminance = luminanceReading
+      ? { status: 'ok',      latencyMs: null, raw: `${Math.round(lumLuminance * 100)}% lum · ${lumColorTemp}` }
+      : { status: 'skipped', latencyMs: null, raw: null }
+
     // ── Elevation ─────────────────────────────────────────────────────────────
     const elevScore    = elevationScore(elevationM)
     sources.elev = elevationM != null
@@ -117,15 +125,16 @@ export function useLocationScore() {
       : { status: 'skipped', latencyMs: null, raw: null }
 
     // ── Composite (weighted) ──────────────────────────────────────────────────
-    // Weights: magnetic 22%, Kp 18%, ground 18%, air 18%, pressure 12%, acoustic 12%
+    // Weights: magnetic 20%, Kp 16%, ground 16%, air 16%, pressure 11%, acoustic 11%, luminance 10%
     const weightedAether = (() => {
       const factors = [
-        { score: magScoreVal,  weight: 0.22 },
-        { score: kpScoreVal,   weight: 0.18 },
-        { score: groundScore,  weight: 0.18 },
-        { score: airScoreVal,  weight: 0.18 },
-        { score: pressScore,   weight: 0.12 },
-        { score: acScoreVal,   weight: 0.12 },
+        { score: magScoreVal,  weight: 0.20 },
+        { score: kpScoreVal,   weight: 0.16 },
+        { score: groundScore,  weight: 0.16 },
+        { score: airScoreVal,  weight: 0.16 },
+        { score: pressScore,   weight: 0.11 },
+        { score: acScoreVal,   weight: 0.11 },
+        { score: lumScoreVal,  weight: 0.10 },
       ]
       const available = factors.filter(f => f.score != null)
       if (!available.length) return null
@@ -138,13 +147,14 @@ export function useLocationScore() {
       magVariance, groundRms,
       sources,
       scores: {
-        magnetic: magScoreVal,
-        kp:       kpScoreVal,
-        ground:   groundScore,
-        air:      airScoreVal,
-        pressure: pressScore,
-        acoustic: acScoreVal,
-        elev:     elevScore,
+        magnetic:  magScoreVal,
+        kp:        kpScoreVal,
+        ground:    groundScore,
+        air:       airScoreVal,
+        pressure:  pressScore,
+        acoustic:  acScoreVal,
+        luminance: lumScoreVal,
+        elev:      elevScore,
       },
       aether: weightedAether,
     })

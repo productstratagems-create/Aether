@@ -52,6 +52,17 @@ export function acousticCalmScore(db) {
   return 22
 }
 
+export function luminanceScore(luminance, colorTemp) {
+  if (luminance == null) return null
+  const base = luminance < 0.05 ? 58
+             : luminance < 0.20 ? 65
+             : luminance < 0.50 ? 72
+             : luminance < 0.80 ? 82
+             : 90
+  const bonus = colorTemp === 'cool' ? 4 : colorTemp === 'warm' ? -3 : 0
+  return Math.min(95, Math.max(20, base + bonus))
+}
+
 export function elevationScore(meters) {
   if (meters == null) return null
   return Math.min(95, Math.round(25 + Math.sqrt(Math.max(0, meters)) * 1.6))

@@ -10,6 +10,7 @@ function scoreColor(s) {
 const ARCHETYPE_FIELD = {
   'Still':      { primary: '#312e81', secondary: '#1e1b4b', duration: '6s',   text: '#a5b4fc' },
   'Charged':    { primary: '#1d4ed8', secondary: '#93c5fd', duration: '1.5s', text: '#bfdbfe' },
+  'Radiant':    { primary: '#92400e', secondary: '#d97706', duration: '4.5s', text: '#fef3c7' },
   'Incoming':   { primary: '#374151', secondary: '#78350f', duration: '3s',   text: '#d1d5db' },
   'Tidal':      { primary: '#1e3a5f', secondary: '#3730a3', duration: '8s',   text: '#c7d2fe' },
   'Grounded':   { primary: '#3b1f0a', secondary: '#92400e', duration: '2.5s', text: '#fcd34d' },
@@ -21,7 +22,7 @@ const ARCHETYPE_FIELD = {
 const IDLE_FIELD = { primary: '#0f0f1a', secondary: '#1d2b50', duration: '7s', text: 'var(--color-text-dim)' }
 
 export default function InstrumentView({
-  kinetic, acoustic, atmospheric, magnetometer,
+  kinetic, acoustic, atmospheric, magnetometer, luminance,
   archetype, scoreStatus, scoreResult, scoreCompute,
   onExpert,
 }) {
@@ -55,7 +56,7 @@ export default function InstrumentView({
   }, [atmospheric.status, atmospheric.reading]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const triggerCompute = (reading) => {
-    scoreCompute(reading.lat, reading.lon, reading.elevationM, kinetic.reading, acoustic.reading, magnetometer?.reading ?? null, reading)
+    scoreCompute(reading.lat, reading.lon, reading.elevationM, kinetic.reading, acoustic.reading, magnetometer?.reading ?? null, reading, luminance?.reading ?? null)
   }
 
   const isBusy  = pendingScore || atmospheric.status === 'sampling' || scoreStatus === 'computing'
@@ -68,6 +69,7 @@ export default function InstrumentView({
   const gndActive = kinetic.status === 'active'
   const acActive  = acoustic.status === 'listening' || acoustic.status === 'calibrating'
   const atmActive = atmospheric.status === 'ready' || atmospheric.status === 'sampling'
+  const lumActive = luminance?.status === 'ready' || luminance?.status === 'sampling'
 
   return (
     <>
@@ -117,11 +119,13 @@ export default function InstrumentView({
         {/* Bottom strip: sensor dots + score */}
         <div className="field-bottom">
           <div className="sensor-dots">
-            <span className="sensor-dot" title="Magnetic"  style={{ background: magActive ? '#60a5fa' : 'rgba(255,255,255,0.12)' }} />
-            <span className="sensor-dot" title="Ground"    style={{ background: gndActive ? '#a78bfa' : 'rgba(255,255,255,0.12)' }} />
-            <span className="sensor-dot" title="Acoustic"  style={{ background: acActive  ? '#fbbf24' : 'rgba(255,255,255,0.12)', cursor: acoustic.status === 'idle' ? 'pointer' : 'default' }}
+            <span className="sensor-dot" title="Magnetic"   style={{ background: magActive ? '#60a5fa' : 'rgba(255,255,255,0.12)' }} />
+            <span className="sensor-dot" title="Ground"     style={{ background: gndActive ? '#a78bfa' : 'rgba(255,255,255,0.12)' }} />
+            <span className="sensor-dot" title="Acoustic"   style={{ background: acActive  ? '#4ade80' : 'rgba(255,255,255,0.12)', cursor: acoustic.status === 'idle' ? 'pointer' : 'default' }}
               onClick={acoustic.status === 'idle' ? acoustic.start : undefined} />
             <span className="sensor-dot" title="Atmosphere" style={{ background: atmActive ? '#34d399' : 'rgba(255,255,255,0.12)' }} />
+            <span className="sensor-dot" title="Light"      style={{ background: lumActive ? '#f59e0b' : 'rgba(255,255,255,0.12)', cursor: luminance?.status === 'idle' ? 'pointer' : 'default' }}
+              onClick={luminance?.status === 'idle' ? luminance?.sample : undefined} />
           </div>
           {score != null && (
             <span className="field-score-val" style={{ color: scoreColor(score) }}>

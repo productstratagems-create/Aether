@@ -17,6 +17,7 @@ export const SCORE_LABELS = {
   pressure:  'Pressure',
   acoustic:  'Acoustic',
   elev:      'Elevation',
+  luminance: 'Light Quality',
 }
 
 export const SOURCE_META = {
@@ -27,6 +28,7 @@ export const SOURCE_META = {
   pressure:  { label: 'Pressure',      domain: 'api.open-meteo.com' },
   acoustic:  { label: 'Acoustic',      domain: 'Microphone API' },
   elev:      { label: 'Elevation',     domain: 'api.open-meteo.com' },
+  luminance: { label: 'Light Quality', domain: 'Camera API' },
 }
 
 // Ground vibration zones (accelerometer, frequencies above SPECTRUM_MIN_HZ only)
@@ -43,6 +45,15 @@ export const ACOUSTIC_ZONES = {
   ambient: { label: 'Ambient', color: '#9ca3af', desc: '12–22 dB above ambient — ordinary indoor environment' },
   active:  { label: 'Active',  color: '#fbbf24', desc: '22–35 dB above ambient — busy street, crowd' },
   loud:    { label: 'Loud',    color: '#f87171', desc: '≥ 35 dB above ambient — construction, concert, machinery' },
+}
+
+// Light quality zones (camera-based luminance, 0–1)
+export const LIGHT_ZONES = {
+  dark:   { label: 'Dark',   color: '#374151', desc: 'Very low light — night, underground, enclosed' },
+  dim:    { label: 'Dim',    color: '#6b7280', desc: 'Dimly lit — lamp, dusk, cave entrance' },
+  indoor: { label: 'Indoor', color: '#9ca3af', desc: 'Typical artificial lighting' },
+  bright: { label: 'Bright', color: '#fbbf24', desc: 'Bright window light or overcast outdoor' },
+  full:   { label: 'Full',   color: '#f59e0b', desc: 'Direct daylight — open sky' },
 }
 
 // Magnetic field stability zones
