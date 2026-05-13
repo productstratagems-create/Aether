@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { classify } from './classify.js'
 import { lunarPhase } from './utils/lunar.js'
 import { useKineticSensor }       from './hooks/useKineticSensor.js'
@@ -7,6 +7,7 @@ import { useAtmosphericSensor }   from './hooks/useAtmosphericSensor.js'
 import { useMagnetometerSensor }  from './hooks/useMagnetometerSensor.js'
 import { useLocationScore }       from './hooks/useLocationScore.js'
 import { useLocationHistory }     from './hooks/useLocationHistory.js'
+import { useKpIndex }             from './hooks/useKpIndex.js'
 import TabBar        from './components/TabBar.jsx'
 import InstrumentView from './views/InstrumentView.jsx'
 import ScanView      from './views/ScanView.jsx'
@@ -24,15 +25,37 @@ export default function App() {
   const acoustic     = useAcousticSensor()
   const atmospheric  = useAtmosphericSensor()
   const magnetometer = useMagnetometerSensor()
+  const kp           = useKpIndex()
   const { status: scoreStatus, result: scoreResult, compute: scoreCompute } = useLocationScore()
   const { history, save, remove, clear } = useLocationHistory()
 
-  const { a: atmosphericTier, archetype } = useMemo(
-    () => classify(kinetic.reading, null, atmospheric.reading, acoustic.reading, magnetometer.reading, null, TODAY_LUNAR),
-    [kinetic.reading, atmospheric.reading, acoustic.reading, magnetometer.reading]
+  // Raw archetype recomputed whenever any sensor reading or Kp changes
+  const { a: atmosphericTier, archetype: rawArchetype } = useMemo(
+    () => classify(kinetic.reading, null, atmospheric.reading, acoustic.reading, magnetometer.reading, kp, TODAY_LUNAR),
+    [kinetic.reading, atmospheric.reading, acoustic.reading, magnetometer.reading, kp]
   )
 
-  // Expose tier on atmospheric object for InstrumentView
+  // Stable archetype: commit only after 5 seconds of consistent raw classification
+  // to prevent display flickering at zone boundaries
+  const [archetype, setArchetype]   = useState(null)
+  const stableTimerRef              = useRef(null)
+  const pendingNameRef              = useRef(null)
+
+  useEffect(() => {
+    const name = rawArchetype?.name ?? null
+    if (name === pendingNameRef.current) return
+    pendingNameRef.current = name
+    clearTimeout(stableTimerRef.current)
+    if (archetype == null) {
+      setArchetype(rawArchetype)
+    } else {
+      stableTimerRef.current = setTimeout(() => setArchetype(rawArchetype), 5000)
+    }
+  }, [rawArchetype?.name]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => () => clearTimeout(stableTimerRef.current), [])
+
+  // Expose tier on atmospheric object for ScanView
   const atmosphericWithTier = { ...atmospheric, tier: atmosphericTier }
 
   const sensorActive =

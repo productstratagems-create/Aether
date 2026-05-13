@@ -23,15 +23,15 @@ export function atmosphericTier(pressureHpa, deltaP) {
 
 const ARCHETYPES = [
   {
-    name: 'Fractured Field',
-    description: 'The geomagnetic field is disturbed — elevated planetary activity or turbulent local magnetics are fragmenting the background field. Difficult to settle here.',
+    name: 'Charged',
+    description: 'Geomagnetic disturbance is elevated — turbulence in the invisible background field.',
     sensation: 'Disruption',
     match: ({ kp, magStability }) =>
       (kp != null && kp >= 4) || magStability === 'turbulent',
   },
   {
-    name: 'Still Depth',
-    description: 'All channels converge toward quiet — ground, air, field, and atmosphere are at rest together. The rarest configuration; maximum coherence.',
+    name: 'Still',
+    description: 'Ground, air, field, and atmosphere are at rest together. The rarest convergence.',
     sensation: 'Stillness',
     match: ({ groundZone, acousticZone, magStability, kp, pressureTrend }) =>
       groundZone === 'calm' &&
@@ -41,14 +41,14 @@ const ARCHETYPES = [
       (pressureTrend === 'stable' || pressureTrend == null),
   },
   {
-    name: 'Pressure Break',
-    description: 'Barometric pressure is falling — the atmosphere is reorganising ahead of an incoming system. Something is coming.',
+    name: 'Incoming',
+    description: 'Barometric pressure is falling. The atmosphere is reorganising ahead of a system.',
     sensation: 'Anticipation',
     match: ({ pressureTrend }) => pressureTrend === 'falling',
   },
   {
-    name: 'Lunar Pull',
-    description: 'The Moon is at new or full phase, maximising tidal influence on atmosphere and fluid systems. The gravitational geometry is at its most pronounced.',
+    name: 'Tidal',
+    description: 'Near new or full moon — gravitational alignment at its most pronounced.',
     sensation: 'Receptivity',
     match: ({ lunarPhase, kp }) =>
       lunarPhase != null &&
@@ -56,8 +56,8 @@ const ARCHETYPES = [
       (kp == null || kp <= 3),
   },
   {
-    name: 'Live Ground',
-    description: 'Mechanical energy is present in the ground — structural vibration, geological resonance, or urban infrastructure is transmitting through the substrate beneath you.',
+    name: 'Grounded',
+    description: 'Mechanical resonance in the ground. Earth energy transmitting through the substrate.',
     sensation: 'Aliveness',
     match: ({ groundZone, kineticReading }) =>
       groundZone === 'active' &&
@@ -66,16 +66,16 @@ const ARCHETYPES = [
       kineticReading.dominantHz <= 12,
   },
   {
-    name: 'Dense Field',
-    description: "Multiple channels are simultaneously elevated — ground vibration, acoustic energy, and mechanical throughput are compounding. The field is thick with civilisation's output.",
+    name: 'Saturated',
+    description: 'Ground vibration, noise, and density compounding. The field is full.',
     sensation: 'Saturation',
     match: ({ groundZone, acousticZone }) =>
       groundZone === 'stress' ||
       (groundZone === 'active' && (acousticZone === 'active' || acousticZone === 'loud')),
   },
   {
-    name: 'Open Channel',
-    description: 'Ground is calm, the acoustic environment is uncluttered, and the magnetic field is undisturbed. The background noise of infrastructure has receded — signal can move freely.',
+    name: 'Clear',
+    description: 'Ground calm, field stable, acoustics uncluttered. Signal moves freely here.',
     sensation: 'Expansion',
     match: ({ groundZone, acousticZone, magStability }) =>
       groundZone === 'calm' &&
@@ -83,8 +83,8 @@ const ARCHETYPES = [
       (magStability === 'stable' || magStability == null),
   },
   {
-    name: 'Flux',
-    description: 'The field is in motion — no single pattern dominates. Multiple variables are mid-range or changing. This location is between states.',
+    name: 'Unsettled',
+    description: 'No single pattern dominates. The field is between states.',
     sensation: 'Transition',
     match: () => true,
   },
