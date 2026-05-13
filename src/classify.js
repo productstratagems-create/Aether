@@ -26,8 +26,9 @@ const ARCHETYPES = [
     name: 'Charged',
     description: 'Geomagnetic disturbance is elevated — turbulence in the invisible background field.',
     sensation: 'Disruption',
-    match: ({ kp, magStability }) =>
-      (kp != null && kp >= 4) || magStability === 'turbulent',
+    match: ({ kp, magStability, seismicActivity }) =>
+      (kp != null && kp >= 4) || magStability === 'turbulent' ||
+      (seismicActivity != null && seismicActivity >= 3),
   },
   {
     name: 'Still',
@@ -48,6 +49,16 @@ const ARCHETYPES = [
       (lightZone === 'full' || lightZone === 'bright') &&
       groundZone === 'calm' &&
       (kp == null || kp <= 3),
+  },
+  {
+    name: 'Ancient',
+    description: 'Billion-year-old rock underlies this place. The ground has been here longer than complex life.',
+    sensation: 'Depth',
+    match: ({ geologicAgeGa, groundZone, kp, seismicActivity }) =>
+      geologicAgeGa != null && geologicAgeGa >= 1.0 &&
+      (groundZone === 'calm' || groundZone == null) &&
+      (kp == null || kp <= 3) &&
+      (seismicActivity == null || seismicActivity === 0),
   },
   {
     name: 'Incoming',
@@ -101,20 +112,23 @@ const ARCHETYPES = [
 
 // ─── Main classifier ──────────────────────────────────────────────────────────
 
-export function classify(kineticReading, _unused, atmosphericReading, acousticReading, magnetometerReading, kp, lunarPhase, luminanceReading) {
+export function classify(kineticReading, _unused, atmosphericReading, acousticReading, magnetometerReading, kp, lunarPhase, luminanceReading, geoReading) {
   const a = atmosphericReading
     ? atmosphericTier(atmosphericReading.pressureHpa, atmosphericReading.deltaP)
     : null
 
   const ctx = {
-    groundZone:    kineticReading?.zone           ?? null,
-    acousticZone:  acousticReading?.zone          ?? null,
-    magStability:  magnetometerReading?.stability ?? null,
-    kp:            kp ?? null,
-    pressureTrend: a?.trend                       ?? null,
-    lunarPhase:    lunarPhase                     ?? null,
-    lightZone:     luminanceReading?.zone         ?? null,
-    colorTemp:     luminanceReading?.colorTemp    ?? null,
+    groundZone:      kineticReading?.zone           ?? null,
+    acousticZone:    acousticReading?.zone          ?? null,
+    magStability:    magnetometerReading?.stability ?? null,
+    kp:              kp ?? null,
+    pressureTrend:   a?.trend                       ?? null,
+    lunarPhase:      lunarPhase                     ?? null,
+    lightZone:       luminanceReading?.zone         ?? null,
+    colorTemp:       luminanceReading?.colorTemp    ?? null,
+    geologicAgeGa:   geoReading?.ageGa              ?? null,
+    rockClass:       geoReading?.rockClass          ?? null,
+    seismicActivity: geoReading?.seismicCount       ?? null,
     kineticReading,
     magnetometerReading,
   }

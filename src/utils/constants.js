@@ -16,19 +16,39 @@ export const SCORE_LABELS = {
   air:       'Air Clarity',
   pressure:  'Pressure',
   acoustic:  'Acoustic',
-  elev:      'Elevation',
   luminance: 'Light Quality',
+  geology:   'Geologic Depth',
+  seismic:   'Regional Seismicity',
+  elev:      'Elevation',
 }
 
 export const SOURCE_META = {
-  magnetic:  { label: 'Magnetic Field', domain: 'Magnetometer API' },
-  kp:        { label: 'Geomagnetic Kp', domain: 'services.swpc.noaa.gov' },
-  ground:    { label: 'Ground Calm',    domain: 'DeviceMotion API' },
-  air:       { label: 'Air Clarity',   domain: 'air-quality-api.open-meteo.com' },
-  pressure:  { label: 'Pressure',      domain: 'api.open-meteo.com' },
-  acoustic:  { label: 'Acoustic',      domain: 'Microphone API' },
-  elev:      { label: 'Elevation',     domain: 'api.open-meteo.com' },
-  luminance: { label: 'Light Quality', domain: 'Camera API' },
+  magnetic:  { label: 'Magnetic Field',      domain: 'Magnetometer API'               },
+  kp:        { label: 'Geomagnetic Kp',      domain: 'services.swpc.noaa.gov'         },
+  ground:    { label: 'Ground Calm',         domain: 'DeviceMotion API'               },
+  air:       { label: 'Air Clarity',         domain: 'air-quality-api.open-meteo.com' },
+  pressure:  { label: 'Pressure',            domain: 'api.open-meteo.com'             },
+  acoustic:  { label: 'Acoustic',            domain: 'Microphone API'                 },
+  luminance: { label: 'Light Quality',       domain: 'Camera API'                     },
+  geology:   { label: 'Geologic Depth',      domain: 'macrostrat.org'                 },
+  seismic:   { label: 'Regional Seismicity', domain: 'earthquake.usgs.gov'            },
+  elev:      { label: 'Elevation',           domain: 'api.open-meteo.com'             },
+}
+
+// Geological era classifications (age in Ma = millions of years)
+export const GEOLOGY_ERAS = [
+  { minMa: 2500, label: 'Archean'      },
+  { minMa:  541, label: 'Proterozoic'  },
+  { minMa:  252, label: 'Paleozoic'    },
+  { minMa:   66, label: 'Mesozoic'     },
+  { minMa:    0, label: 'Cenozoic'     },
+]
+
+export const ROCK_CLASSES = {
+  igneous:     { label: 'Igneous',     color: '#ef4444' },
+  metamorphic: { label: 'Metamorphic', color: '#8b5cf6' },
+  sedimentary: { label: 'Sedimentary', color: '#f59e0b' },
+  unknown:     { label: 'Unknown',     color: '#6b7280' },
 }
 
 // Ground vibration zones (accelerometer, frequencies above SPECTRUM_MIN_HZ only)
