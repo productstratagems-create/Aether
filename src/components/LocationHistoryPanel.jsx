@@ -118,6 +118,27 @@ export default function LocationHistoryPanel({ history, onRemove, onClear }) {
                     .map(([key, value]) => (
                       <ScoreGauge key={key} label={SCORE_LABELS[key] ?? key} value={value} />
                     ))}
+
+                  {entry.archetype?.name && (
+                    <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', marginTop: '0.4rem' }}>
+                      <span style={{ fontSize: '0.65rem', color: 'var(--color-text-dim)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Field</span>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', fontWeight: 600 }}>{entry.archetype.name}</span>
+                      {entry.archetype.sensation && (
+                        <span style={{ fontSize: '0.65rem', color: 'var(--color-text-dim)', fontStyle: 'italic' }}>· {entry.archetype.sensation}</span>
+                      )}
+                    </div>
+                  )}
+
+                  {entry.narrative && (
+                    <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', marginTop: '0.5rem', paddingTop: '0.5rem' }}>
+                      <div style={{ fontSize: '0.6rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--color-text-dim)', marginBottom: '0.3rem' }}>
+                        Field Reading
+                      </div>
+                      <p style={{ fontSize: '0.72rem', lineHeight: 1.55, color: 'var(--color-text-muted)', fontStyle: 'italic', margin: 0 }}>
+                        {entry.narrative}
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

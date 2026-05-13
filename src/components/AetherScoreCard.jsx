@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef } from 'react'
 import { SCORE_LABELS, ROCK_CLASSES } from '../utils/constants.js'
+import { generateNarrative } from '../utils/narrative.js'
 import RadialGauge from './RadialGauge.jsx'
 import ScoreSparkline from './ScoreSparkline.jsx'
 import ScoreGauge from './ScoreGauge.jsx'
 import SourcesPanel from './SourcesPanel.jsx'
 
 export default function AetherScoreCard({
-  atmospheric, kinetic, acoustic, magnetometer, luminance,
+  atmospheric, kinetic, acoustic, magnetometer, luminance, archetype,
   scoreStatus, scoreResult, scoreCompute,
   onSave, history,
 }) {
@@ -26,7 +27,7 @@ export default function AetherScoreCard({
     const prevAether = history[0]?.aether ?? null
     const d = scoreResult.aether != null && prevAether != null ? scoreResult.aether - prevAether : null
     setDelta(d)
-    onSave({
+    const entryBase = {
       id:          Date.now(),
       ts:          new Date().toISOString(),
       city:        scoreResult.city,
@@ -41,7 +42,15 @@ export default function AetherScoreCard({
         pm25Val:    scoreResult.pm25Val,
         elevationM: scoreResult.elevationM,
       },
-    })
+      archetype: archetype
+        ? { name: archetype.name, description: archetype.description, sensation: archetype.sensation }
+        : null,
+      geology: scoreResult.geology ?? null,
+      seismic: scoreResult.seismicCount != null
+        ? { count: scoreResult.seismicCount, maxMag: scoreResult.seismicMaxMag ?? null }
+        : null,
+    }
+    onSave({ ...entryBase, narrative: generateNarrative(entryBase) })
   }, [scoreStatus, scoreResult]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const sparkValues = [

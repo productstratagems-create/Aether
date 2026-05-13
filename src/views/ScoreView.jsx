@@ -11,6 +11,7 @@ export default function ScoreView({ kinetic, acoustic, atmospheric, magnetometer
         acoustic={acoustic}
         magnetometer={magnetometer}
         luminance={luminance}
+        archetype={archetype}
         scoreStatus={scoreStatus}
         scoreResult={scoreResult}
         scoreCompute={scoreCompute}
