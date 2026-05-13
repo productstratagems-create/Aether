@@ -1,6 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import SensorOrb from '../components/SensorOrb.jsx'
-import { GROUND_ZONES, ACOUSTIC_ZONES, MAGNETIC_ZONES } from '../utils/constants.js'
 
 function scoreColor(s) {
   if (s == null) return 'var(--color-text-dim)'
@@ -8,6 +6,19 @@ function scoreColor(s) {
   if (s >= 40) return '#fbbf24'
   return '#f87171'
 }
+
+const ARCHETYPE_FIELD = {
+  'Deep Silence':    { primary: '#312e81', secondary: '#1e1b4b', duration: '6s',   text: '#a5b4fc' },
+  'Magnetic Storm':  { primary: '#1d4ed8', secondary: '#93c5fd', duration: '1.5s', text: '#bfdbfe' },
+  'Storm Front':     { primary: '#374151', secondary: '#78350f', duration: '3s',   text: '#d1d5db' },
+  'Lunar Tide':      { primary: '#1e3a5f', secondary: '#3730a3', duration: '8s',   text: '#c7d2fe' },
+  'Trembling Earth': { primary: '#3b1f0a', secondary: '#92400e', duration: '2.5s', text: '#fcd34d' },
+  'Urban Pulse':     { primary: '#7c1d1d', secondary: '#9a3412', duration: '1.8s', text: '#fca5a5' },
+  'Clear Ground':    { primary: '#064e3b', secondary: '#065f46', duration: '5s',   text: '#6ee7b7' },
+  'Shifting Field':  { primary: '#1f1635', secondary: '#374151', duration: '4s',   text: '#9ca3af' },
+}
+
+const IDLE_FIELD = { primary: '#0f0f1a', secondary: '#1d2b50', duration: '7s', text: 'var(--color-text-dim)' }
 
 export default function InstrumentView({
   kinetic, acoustic, atmospheric, magnetometer,
@@ -47,113 +58,79 @@ export default function InstrumentView({
     scoreCompute(reading.lat, reading.lon, reading.elevationM, kinetic.reading, acoustic.reading, magnetometer?.reading ?? null)
   }
 
-  const isBusy = pendingScore || atmospheric.status === 'sampling' || scoreStatus === 'computing'
-  const score  = scoreResult?.aether ?? null
-  const loc    = scoreResult?.city ?? atmospheric.reading ? [scoreResult?.city, scoreResult?.featureName].filter(Boolean).join(' · ') : null
+  const isBusy  = pendingScore || atmospheric.status === 'sampling' || scoreStatus === 'computing'
+  const score   = scoreResult?.aether ?? null
+  const loc     = scoreResult?.city ?? null
+  const field   = archetype ? (ARCHETYPE_FIELD[archetype.name] ?? IDLE_FIELD) : IDLE_FIELD
 
-  // Sensor orb data
-  const magReading = magnetometer.reading
-  const gndReading = kinetic.reading
-  const acReading  = acoustic.reading
-  const atmReading = atmospheric.reading
-
-  const magZone  = magReading?.stability ? MAGNETIC_ZONES[magReading.stability] : null
-  const gndZone  = gndReading?.zone      ? GROUND_ZONES[gndReading.zone]        : null
-  const acZone   = acReading?.zone       ? ACOUSTIC_ZONES[acReading.zone]       : null
+  // Sensor dot activity
+  const magActive = magnetometer.status === 'active'
+  const gndActive = kinetic.status === 'active'
+  const acActive  = acoustic.status === 'listening'
+  const atmActive = atmospheric.status === 'ready' || atmospheric.status === 'sampling'
 
   return (
-    <div className="instrument-view">
+    <>
+      {/* Full-screen ambient background */}
+      <div className="field-bg" style={{
+        '--field-primary':   field.primary,
+        '--field-secondary': field.secondary,
+        '--field-duration':  field.duration,
+      }} />
 
-      {/* Header */}
-      <div className="instrument-header">
-        <button className="instrument-expert-btn" onClick={onExpert} title="Expert view">
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-            <rect x="2" y="2" width="5" height="5" rx="1" />
-            <rect x="11" y="2" width="5" height="5" rx="1" />
-            <rect x="2" y="11" width="5" height="5" rx="1" />
-            <rect x="11" y="11" width="5" height="5" rx="1" />
-          </svg>
-        </button>
-        {loc && <div className="instrument-location">{loc}</div>}
-      </div>
+      <div className="instrument-view">
 
-      {/* Archetype */}
-      <div className="instrument-archetype">
-        {archetype ? (
-          <>
-            <div className="instrument-archetype-name">{archetype.name}</div>
-            <div className="instrument-archetype-sensation">{archetype.sensation}</div>
-            <p className="instrument-archetype-desc">{archetype.description}</p>
-          </>
-        ) : (
-          <>
-            <div className="instrument-archetype-name" style={{ color: 'var(--color-text-dim)' }}>Sensing…</div>
-            <div className="instrument-archetype-sensation">Start sensors to read the field</div>
-          </>
-        )}
-      </div>
-
-      {/* Sensor constellation */}
-      <div className="sensor-grid">
-        <SensorOrb
-          label="Magnetic"
-          value={magReading?.magnitude != null ? magReading.magnitude.toFixed(1) : null}
-          unit="μT"
-          zone={magZone?.label ?? null}
-          zoneColor={magZone?.color ?? null}
-          status={magnetometer.status}
-          channelColor="#60a5fa"
-        />
-        <SensorOrb
-          label="Ground"
-          value={gndReading?.dominantHz != null ? gndReading.dominantHz.toFixed(1) : null}
-          unit="Hz"
-          zone={gndZone?.label ?? null}
-          zoneColor={gndZone?.color ?? null}
-          status={kinetic.status}
-          channelColor="#a78bfa"
-        />
-        <SensorOrb
-          label="Acoustic"
-          value={acReading?.db ?? null}
-          unit="dB"
-          zone={acZone?.label ?? null}
-          zoneColor={acZone?.color ?? null}
-          status={acoustic.status === 'listening' ? 'active' : acoustic.status}
-          channelColor="#fbbf24"
-          onActivate={acoustic.status === 'idle' ? acoustic.start : null}
-        />
-        <SensorOrb
-          label="Pressure"
-          value={atmReading?.pressureHpa ?? null}
-          unit=" hPa"
-          zone={atmReading ? (atmospheric.tier?.trendLabel ?? 'Sampled') : null}
-          zoneColor={atmReading ? '#34d399' : null}
-          status={atmospheric.status === 'sampling' ? 'active' : atmospheric.status === 'ready' ? 'ready' : 'idle'}
-          channelColor="#34d399"
-        />
-      </div>
-
-      {/* Score */}
-      <div className="instrument-score-row">
-        <div className="instrument-score-val" style={{ color: scoreColor(score) }}>
-          {score ?? '—'}
+        {/* Top bar: expert button + location */}
+        <div className="instrument-header">
+          <button className="instrument-expert-btn" onClick={onExpert} title="Expert view">
+            <svg width="16" height="16" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <rect x="2" y="2" width="5" height="5" rx="1" />
+              <rect x="11" y="2" width="5" height="5" rx="1" />
+              <rect x="2" y="11" width="5" height="5" rx="1" />
+              <rect x="11" y="11" width="5" height="5" rx="1" />
+            </svg>
+          </button>
+          {loc && <div className="instrument-location">{loc}</div>}
         </div>
-        <div style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)' }}>
-          {score != null ? '/100 aether' : 'not yet scored'}
+
+        {/* Centered archetype — dominant element */}
+        <div className="field-center">
+          <div className="field-name" style={{ color: field.text }}>
+            {archetype?.name ?? 'Sensing…'}
+          </div>
+          <div className="field-sensation">
+            {archetype?.sensation ?? 'activate sensors to read the field'}
+          </div>
         </div>
-      </div>
 
-      <div style={{ padding: '0 1.25rem 1rem' }}>
-        <button
-          className="sensor-btn instrument-score-btn"
-          onClick={handleScore}
-          disabled={isBusy}
-        >
-          {isBusy ? 'Reading field…' : score != null ? 'Rescore Location' : 'Score Location'}
-        </button>
-      </div>
+        {/* Score button */}
+        <div className="field-score-action">
+          <button
+            className="field-score-btn"
+            onClick={handleScore}
+            disabled={isBusy}
+          >
+            {isBusy ? 'Reading field…' : score != null ? 'Rescore' : 'Score Location'}
+          </button>
+        </div>
 
-    </div>
+        {/* Bottom strip: sensor dots + score */}
+        <div className="field-bottom">
+          <div className="sensor-dots">
+            <span className="sensor-dot" title="Magnetic"  style={{ background: magActive ? '#60a5fa' : 'rgba(255,255,255,0.12)' }} />
+            <span className="sensor-dot" title="Ground"    style={{ background: gndActive ? '#a78bfa' : 'rgba(255,255,255,0.12)' }} />
+            <span className="sensor-dot" title="Acoustic"  style={{ background: acActive  ? '#fbbf24' : 'rgba(255,255,255,0.12)', cursor: acoustic.status === 'idle' ? 'pointer' : 'default' }}
+              onClick={acoustic.status === 'idle' ? acoustic.start : undefined} />
+            <span className="sensor-dot" title="Atmosphere" style={{ background: atmActive ? '#34d399' : 'rgba(255,255,255,0.12)' }} />
+          </div>
+          {score != null && (
+            <span className="field-score-val" style={{ color: scoreColor(score) }}>
+              {score}<span style={{ fontSize: '0.55rem', opacity: 0.6, marginLeft: '0.15rem' }}>/100</span>
+            </span>
+          )}
+        </div>
+
+      </div>
+    </>
   )
 }
