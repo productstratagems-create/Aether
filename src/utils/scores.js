@@ -44,11 +44,11 @@ export function pressureStabilityScore(deltaP) {
 
 export function acousticCalmScore(db) {
   if (db == null) return null
-  // dB SPL — lower = quieter = higher score
-  if (db < 30)  return 92
-  if (db < 45)  return 80
-  if (db < 58)  return 62
-  if (db < 70)  return 40
+  // db is relative dB above ambient baseline — lower = quieter = higher score
+  if (db < 3)  return 92
+  if (db < 12) return 80
+  if (db < 22) return 62
+  if (db < 35) return 40
   return 22
 }
 

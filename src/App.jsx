@@ -37,7 +37,7 @@ export default function App() {
 
   const sensorActive =
     kinetic.status === 'active' ||
-    acoustic.status === 'listening'
+    acoustic.status === 'listening' || acoustic.status === 'calibrating'
 
   const latestScore = scoreResult?.aether ?? history[0]?.aether ?? null
 

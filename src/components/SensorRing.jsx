@@ -7,7 +7,7 @@ export default function SensorRing({ status, color, restSecondsLeft, restTotalSe
   const strokeW = 2.5
 
   const idle = status === 'idle' || status === 'pending'
-  const active = status === 'active' || status === 'listening'
+  const active = status === 'active' || status === 'listening' || status === 'calibrating'
   const resting = status === 'resting'
   const ready = status === 'ready'
   const denied = status === 'denied' || status === 'error'

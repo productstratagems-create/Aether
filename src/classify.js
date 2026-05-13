@@ -23,72 +23,69 @@ export function atmosphericTier(pressureHpa, deltaP) {
 
 const ARCHETYPES = [
   {
-    name: 'Magnetic Storm',
-    description: 'Elevated planetary geomagnetic activity is disturbing the local field. Heightened solar-terrestrial interaction.',
-    sensation: 'Electric charge',
+    name: 'Fractured Field',
+    description: 'The geomagnetic field is disturbed — elevated planetary activity or turbulent local magnetics are fragmenting the background field. Difficult to settle here.',
+    sensation: 'Disruption',
     match: ({ kp, magStability }) =>
-      (kp != null && kp >= 5) || magStability === 'turbulent',
+      (kp != null && kp >= 4) || magStability === 'turbulent',
   },
   {
-    name: 'Deep Silence',
-    description: 'Still ground, quiet air, coherent magnetic field, stable atmosphere. The rarest convergence — maximum restorative potential.',
+    name: 'Still Depth',
+    description: 'All channels converge toward quiet — ground, air, field, and atmosphere are at rest together. The rarest configuration; maximum coherence.',
     sensation: 'Stillness',
     match: ({ groundZone, acousticZone, magStability, kp, pressureTrend }) =>
-      (groundZone === 'calm') &&
-      (acousticZone === 'silent' || acousticZone === 'quiet') &&
-      (magStability === 'stable') &&
+      groundZone === 'calm' &&
+      (acousticZone === 'hush' || acousticZone === 'quiet') &&
+      magStability === 'stable' &&
       (kp == null || kp <= 2) &&
       (pressureTrend === 'stable' || pressureTrend == null),
   },
   {
-    name: 'Storm Front',
-    description: 'Barometric pressure is falling. Air quality degrading. The atmosphere is in motion — a system is approaching.',
+    name: 'Pressure Break',
+    description: 'Barometric pressure is falling — the atmosphere is reorganising ahead of an incoming system. Something is coming.',
     sensation: 'Anticipation',
-    match: ({ pressureTrend, acousticZone }) =>
-      pressureTrend === 'falling' &&
-      (acousticZone === 'noisy' || acousticZone === 'loud' || acousticZone === 'ambient'),
+    match: ({ pressureTrend }) => pressureTrend === 'falling',
   },
   {
-    name: 'Lunar Tide',
-    description: 'Near a new or full moon with a quiet field. Tidal forces are at their peak — gravitational alignment with the Sun and Moon.',
+    name: 'Lunar Pull',
+    description: 'The Moon is at new or full phase, maximising tidal influence on atmosphere and fluid systems. The gravitational geometry is at its most pronounced.',
     sensation: 'Receptivity',
-    match: ({ lunarPhase, kp, magStability }) =>
+    match: ({ lunarPhase, kp }) =>
       lunarPhase != null &&
       (lunarPhase.nearNew || lunarPhase.nearFull) &&
-      (kp == null || kp <= 3) &&
-      (magStability === 'stable' || magStability == null),
+      (kp == null || kp <= 3),
   },
   {
-    name: 'Trembling Earth',
-    description: 'Structural vibration at 5–8 Hz detected — the resonant frequency of buildings and geological formations. Mechanical energy rising from the ground.',
-    sensation: 'Grounding',
+    name: 'Live Ground',
+    description: 'Mechanical energy is present in the ground — structural vibration, geological resonance, or urban infrastructure is transmitting through the substrate beneath you.',
+    sensation: 'Aliveness',
     match: ({ groundZone, kineticReading }) =>
       groundZone === 'active' &&
       kineticReading?.dominantHz != null &&
-      kineticReading.dominantHz >= 5 &&
-      kineticReading.dominantHz <= 9,
+      kineticReading.dominantHz >= 4 &&
+      kineticReading.dominantHz <= 12,
   },
   {
-    name: 'Urban Pulse',
-    description: 'High ground vibration, elevated sound level, and degraded air quality. The signature of dense mechanical civilisation.',
-    sensation: 'Overstimulation',
+    name: 'Dense Field',
+    description: "Multiple channels are simultaneously elevated — ground vibration, acoustic energy, and mechanical throughput are compounding. The field is thick with civilisation's output.",
+    sensation: 'Saturation',
     match: ({ groundZone, acousticZone }) =>
       groundZone === 'stress' ||
-      (groundZone === 'active' && (acousticZone === 'noisy' || acousticZone === 'loud')),
+      (groundZone === 'active' && (acousticZone === 'active' || acousticZone === 'loud')),
   },
   {
-    name: 'Clear Ground',
-    description: 'Calm earth, clean air, and a coherent field. A place where the background noise of civilisation has faded.',
+    name: 'Open Channel',
+    description: 'Ground is calm, the acoustic environment is uncluttered, and the magnetic field is undisturbed. The background noise of infrastructure has receded — signal can move freely.',
     sensation: 'Expansion',
     match: ({ groundZone, acousticZone, magStability }) =>
       groundZone === 'calm' &&
-      (acousticZone === 'silent' || acousticZone === 'quiet' || acousticZone === 'ambient') &&
+      (acousticZone === 'hush' || acousticZone === 'quiet' || acousticZone === 'ambient') &&
       (magStability === 'stable' || magStability == null),
   },
   {
-    name: 'Shifting Field',
-    description: 'Multiple signals in flux — pressure, field, or vibration are changing. Gather more readings across this location.',
-    sensation: 'Undefined',
+    name: 'Flux',
+    description: 'The field is in motion — no single pattern dominates. Multiple variables are mid-range or changing. This location is between states.',
+    sensation: 'Transition',
     match: () => true,
   },
 ]

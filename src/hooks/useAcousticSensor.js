@@ -1,23 +1,18 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 
-// Continuous dB SPL metering — not infrasound FFT.
-// Phone MEMS microphones accurately respond to 20 Hz – 20 kHz.
-// We measure RMS of raw audio and convert to approximate dB SPL.
+// Continuous acoustic metering using a relative baseline.
+// On start, the first BASELINE_DURATION ms of audio establishes the ambient floor.
+// All subsequent readings are expressed as dB above that floor — device-agnostic.
 
-const PROCESSOR_SIZE = 4096
-const UPDATE_MS      = 500
-const REFERENCE      = 0.00002  // 20 μPa, threshold of hearing
+const PROCESSOR_SIZE    = 4096
+const UPDATE_MS         = 500
+const BASELINE_DURATION = 2000
 
-function rmsToDb(rmsValue) {
-  if (rmsValue < 1e-10) return 0
-  return Math.max(0, Math.round(20 * Math.log10(rmsValue / REFERENCE)))
-}
-
-function dbZone(db) {
-  if (db < 30) return 'silent'
-  if (db < 50) return 'quiet'
-  if (db < 65) return 'ambient'
-  if (db < 80) return 'noisy'
+function relDbZone(relDb) {
+  if (relDb < 3)  return 'hush'
+  if (relDb < 12) return 'quiet'
+  if (relDb < 22) return 'ambient'
+  if (relDb < 35) return 'active'
   return 'loud'
 }
 
@@ -25,12 +20,15 @@ export function useAcousticSensor() {
   const [status, setStatus]   = useState('idle')
   const [reading, setReading] = useState(null)
 
-  const activeRef    = useRef(false)
-  const streamRef    = useRef(null)
-  const ctxRef       = useRef(null)
-  const processorRef = useRef(null)
-  const timerRef     = useRef(null)
-  const rmsBufferRef = useRef([])
+  const activeRef       = useRef(false)
+  const streamRef       = useRef(null)
+  const ctxRef          = useRef(null)
+  const processorRef    = useRef(null)
+  const timerRef        = useRef(null)
+  const rmsBufferRef    = useRef([])
+  const baselineRmsRef  = useRef(null)
+  const baselineBufRef  = useRef([])
+  const baselineTimerRef = useRef(null)
 
   const closeAudio = useCallback(() => {
     try { processorRef.current?.disconnect() } catch { /* */ }
@@ -43,7 +41,7 @@ export function useAcousticSensor() {
 
   const start = useCallback(() => {
     activeRef.current = true
-    setStatus('listening')
+    setStatus('calibrating')
 
     navigator.mediaDevices
       .getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } })
@@ -68,27 +66,40 @@ export function useAcousticSensor() {
             const data = e.inputBuffer.getChannelData(0)
             e.outputBuffer.getChannelData(0).fill(0)
 
-            // Compute RMS of this frame
             let sum = 0
             for (let i = 0; i < data.length; i++) sum += data[i] * data[i]
             const frameRms = Math.sqrt(sum / data.length)
-            rmsBufferRef.current.push(frameRms)
-            // Keep ~1s of frames
-            if (rmsBufferRef.current.length > Math.ceil(1000 / (PROCESSOR_SIZE / ctx.sampleRate * 1000))) {
-              rmsBufferRef.current.shift()
+
+            if (baselineRmsRef.current == null) {
+              baselineBufRef.current.push(frameRms)
+            } else {
+              rmsBufferRef.current.push(frameRms)
+              const maxFrames = Math.ceil(1000 / (PROCESSOR_SIZE / ctx.sampleRate * 1000))
+              if (rmsBufferRef.current.length > maxFrames) rmsBufferRef.current.shift()
             }
           }
 
           source.connect(proc)
           proc.connect(ctx.destination)
 
-          // Update reading at regular interval
-          timerRef.current = setInterval(() => {
-            if (!activeRef.current || rmsBufferRef.current.length === 0) return
-            const avgRms = rmsBufferRef.current.reduce((a, b) => a + b, 0) / rmsBufferRef.current.length
-            const db = rmsToDb(avgRms)
-            setReading({ db, zone: dbZone(db) })
-          }, UPDATE_MS)
+          // Calibration phase: collect ambient baseline, then switch to 'listening'
+          baselineTimerRef.current = setTimeout(() => {
+            if (!activeRef.current) return
+            const buf = baselineBufRef.current
+            baselineRmsRef.current = buf.length
+              ? buf.reduce((a, b) => a + b, 0) / buf.length
+              : 1e-6
+            baselineBufRef.current = []
+            setStatus('listening')
+
+            timerRef.current = setInterval(() => {
+              if (!activeRef.current || rmsBufferRef.current.length === 0) return
+              const avgRms = rmsBufferRef.current.reduce((a, b) => a + b, 0) / rmsBufferRef.current.length
+              const base   = baselineRmsRef.current
+              const relDb  = base > 0 ? Math.max(0, Math.round(20 * Math.log10(avgRms / base))) : 0
+              setReading({ db: relDb, zone: relDbZone(relDb) })
+            }, UPDATE_MS)
+          }, BASELINE_DURATION)
         })
       })
       .catch(err => {
@@ -101,15 +112,19 @@ export function useAcousticSensor() {
 
   const stop = useCallback(() => {
     activeRef.current = false
+    clearTimeout(baselineTimerRef.current)
     clearInterval(timerRef.current)
     closeAudio()
-    rmsBufferRef.current = []
+    rmsBufferRef.current   = []
+    baselineRmsRef.current = null
+    baselineBufRef.current = []
     setStatus('idle')
     setReading(null)
   }, [closeAudio])
 
   useEffect(() => () => {
     activeRef.current = false
+    clearTimeout(baselineTimerRef.current)
     clearInterval(timerRef.current)
     closeAudio()
   }, [closeAudio])
